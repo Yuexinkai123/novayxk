@@ -11,6 +11,7 @@ import {
   ChevronsUp,
   ChevronRight,
   Code2,
+  Copy,
   FileCode2,
   FileSearch,
   FilePlus2,
@@ -21,11 +22,12 @@ import {
   KeyRound,
   LockKeyhole,
   Moon,
-  PanelRight,
+  Play,
   Plus,
   RefreshCw,
   RotateCcw,
   Save,
+  RotateCw,
   Square,
   Search,
   Send,
@@ -53,6 +55,7 @@ import type {
   TaskSummary,
   AiControlMode,
   ThemeMode,
+  TerminalTask,
 } from "./vite-env";
 
 const defaultProvider: ProviderConfig = {
@@ -91,6 +94,13 @@ type ConfirmDialogState =
       type: "system-action";
       command: string;
       label: string;
+      source: "manual" | "ai";
+      resolve: (confirmed: boolean) => void;
+    }
+  | {
+      type: "admin-request";
+      command: string;
+      reason: string;
       source: "manual" | "ai";
       resolve: (confirmed: boolean) => void;
     };
@@ -153,6 +163,9 @@ function App() {
   const [loadingDirectories, setLoadingDirectories] = React.useState<Set<string>>(new Set());
   const [editorFind, setEditorFind] = React.useState("");
   const [isWordWrapEnabled, setIsWordWrapEnabled] = React.useState(false);
+  const [terminalCommand, setTerminalCommand] = React.useState("npm run dev");
+  const [terminalTasks, setTerminalTasks] = React.useState<TerminalTask[]>([]);
+  const [activeTerminalTaskId, setActiveTerminalTaskId] = React.useState<string | null>(null);
   const chatListRef = React.useRef<HTMLDivElement | null>(null);
 
   const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? providers[0] ?? defaultProvider;
@@ -177,6 +190,8 @@ function App() {
     [editorFind, selectedFile?.content],
   );
   const activeTask = memoryState?.tasks.find((task) => task.id === activeTaskId) ?? null;
+  const activeTerminalTask = terminalTasks.find((task) => task.id === activeTerminalTaskId) ?? terminalTasks[0] ?? null;
+  const runningTerminalTaskCount = terminalTasks.filter((task) => task.status === "running").length;
   const workspaceStyle: React.CSSProperties = {
     gridTemplateColumns: `${isLeftCollapsed ? "0px" : `${leftPanelWidth}px 6px`} minmax(420px, 1fr) ${
       isRightCollapsed ? "0px" : `6px ${rightPanelWidth}px`
@@ -291,6 +306,18 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [treeFilter, project?.root]);
+
+  React.useEffect(() => {
+    if (!window.novayxk) return;
+    void refreshTerminalTasks();
+    return window.novayxk.onTerminalTaskUpdate((payload) => {
+      setTerminalTasks((current) => {
+        const next = upsertTerminalTask(current, payload.task);
+        return next;
+      });
+      setActiveTerminalTaskId((current) => (payload.event === "started" ? payload.task.id : current ?? payload.task.id));
+    });
+  }, []);
 
   const startPanelResize = (
     event: React.PointerEvent,
@@ -415,6 +442,36 @@ function App() {
       }),
     [],
   );
+
+  const confirmAdminRequest = React.useCallback(
+    (command: string, reason: string, source: "manual" | "ai") =>
+      new Promise<boolean>((resolve) => {
+        setConfirmDialog({
+          type: "admin-request",
+          command,
+          reason,
+          source,
+          resolve,
+        });
+      }),
+    [],
+  );
+
+  const requestAdminForCommandIfNeeded = async (
+    command: string,
+    inspection: { requiresAdmin?: boolean; adminReason?: string },
+    source: "manual" | "ai",
+  ) => {
+    if (!inspection.requiresAdmin || privilege?.isAdmin || !privilege?.canElevate) return true;
+    const confirmed = await confirmAdminRequest(command, inspection.adminReason ?? "该命令可能需要管理员权限", source);
+    if (!confirmed) return false;
+    try {
+      await restartAsAdmin();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "管理员授权请求失败");
+    }
+    return false;
+  };
 
   const saveLastProjectRoot = async (projectRoot: string | null) => {
     setLastProjectRoot(projectRoot);
@@ -851,6 +908,88 @@ function App() {
     }
   };
 
+  const refreshTerminalTasks = async () => {
+    if (!window.novayxk) return;
+    try {
+      const tasks = await window.novayxk.listTerminalTasks();
+      setTerminalTasks(tasks);
+      setActiveTerminalTaskId((current) => current ?? tasks[0]?.id ?? null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "读取终端任务失败");
+    }
+  };
+
+  const startTerminalTask = async () => {
+    const command = terminalCommand.trim();
+    if (!command) {
+      setStatus("请输入要启动的终端命令。");
+      return;
+    }
+    if (!project || !window.novayxk) {
+      setStatus("请先打开一个项目。");
+      return;
+    }
+
+    try {
+      const inspection = await window.novayxk.inspectCommand(command);
+      const adminReady = await requestAdminForCommandIfNeeded(command, inspection, "manual");
+      if (!adminReady) {
+        setStatus("已请求管理员授权，Novayxk 将以管理员模式重启。");
+        return;
+      }
+      const confirmedSystemAction = inspection.requiresConfirmation
+        ? await confirmSystemAction(command, inspection.systemAction?.label ?? "系统动作", "manual")
+        : false;
+      if (inspection.requiresConfirmation && !confirmedSystemAction) {
+        setStatus("已取消特殊系统动作");
+        return;
+      }
+      const task = await window.novayxk.startTerminalTask({
+        command,
+        controlMode: aiControlMode,
+        confirmedSystemAction,
+      });
+      setTerminalTasks((current) => upsertTerminalTask(current, task));
+      setActiveTerminalTaskId(task.id);
+      setStatus(`终端任务已启动：${task.title}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "启动终端任务失败");
+    }
+  };
+
+  const stopActiveTerminalTask = async () => {
+    if (!activeTerminalTask || !window.novayxk) return;
+    try {
+      const task = await window.novayxk.stopTerminalTask(activeTerminalTask.id);
+      setTerminalTasks((current) => upsertTerminalTask(current, task));
+      setStatus(`正在停止终端任务：${task.title}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "停止终端任务失败");
+    }
+  };
+
+  const restartActiveTerminalTask = async () => {
+    if (!activeTerminalTask || !window.novayxk) return;
+    try {
+      const task = await window.novayxk.restartTerminalTask(activeTerminalTask.id);
+      setTerminalTasks((current) => upsertTerminalTask(current, task));
+      setActiveTerminalTaskId(task.id);
+      setStatus(`终端任务已重启：${task.title}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "重启终端任务失败");
+    }
+  };
+
+  const copyTerminalOutput = async () => {
+    if (!activeTerminalTask?.output) return;
+    try {
+      await navigator.clipboard.writeText(activeTerminalTask.output);
+      setStatus("终端输出已复制");
+    } catch {
+      setStatus("复制终端输出失败");
+    }
+  };
+
   const buildProjectContextForPrompt = async (userPrompt: string) => {
     if (!project || !window.novayxk) return "";
 
@@ -871,14 +1010,14 @@ function App() {
     if (!trimmed || isLoading) return;
 
     const projectContext = await buildProjectContextForPrompt(trimmed);
-    const context = selectedFile
+    const selectedFileContext = selectedFile
       ? `\n\n当前选中文件：${selectedFile.path}\n\`\`\`\n${selectedFile.content.slice(0, 12000)}\n\`\`\``
       : "";
     const nextMessages: ChatMessage[] = [
       ...messages,
       {
         role: "user",
-        content: `${trimmed}${context}${projectContext}`,
+        content: trimmed,
       },
     ];
 
@@ -901,7 +1040,7 @@ function App() {
           role: "system",
           content: buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext),
         },
-        ...sanitizeChatHistory(nextMessages),
+        ...buildModelChatHistory(nextMessages, `${selectedFileContext}${projectContext}`),
       ];
 
       setMessages([...nextMessages, { role: "assistant", content: "" }]);
@@ -986,6 +1125,11 @@ function App() {
         throw new Error("当前在浏览器预览模式，执行命令需要用 Electron 启动。");
       }
       const inspection = await window.novayxk.inspectCommand(confirmedCommand);
+      const adminReady = await requestAdminForCommandIfNeeded(confirmedCommand, inspection, "manual");
+      if (!adminReady) {
+        setStatus("已请求管理员授权，Novayxk 将以管理员模式重启。");
+        return;
+      }
       const confirmedSystemAction = inspection.requiresConfirmation
         ? await confirmSystemAction(confirmedCommand, inspection.systemAction?.label ?? "系统动作", "manual")
         : false;
@@ -999,7 +1143,7 @@ function App() {
         confirmedSystemAction,
       });
       await syncProjectView();
-      setStatus(result.code === 0 ? "命令执行成功" : "命令执行失败，输出已保留");
+      setStatus(result.longRunning ? "命令已在终端任务中运行" : result.code === 0 ? "命令执行成功" : "命令执行失败，输出已保留");
     } catch (error) {
       const output = error instanceof Error ? error.message : "命令执行失败";
       setStatus(output);
@@ -1051,6 +1195,11 @@ function App() {
           throw new Error("当前在浏览器预览模式，执行命令需要用 Electron 启动。");
         }
         const inspection = await window.novayxk.inspectCommand(commandText);
+        const adminReady = await requestAdminForCommandIfNeeded(commandText, inspection, "ai");
+        if (!adminReady) {
+          resultLines.push(`$ ${commandText}\n需要管理员权限：${inspection.adminReason ?? "该命令可能需要管理员权限"}。Novayxk 已请求用户授权以管理员模式重启，命令尚未执行。`);
+          continue;
+        }
         const confirmedSystemAction = inspection.requiresConfirmation
           ? await confirmSystemAction(commandText, inspection.systemAction?.label ?? "系统动作", "ai")
           : false;
@@ -1064,7 +1213,8 @@ function App() {
           confirmedSystemAction,
         });
         const sourceNote = commandRequest.source === "inline" ? "来源：普通文本中识别出的疑似命令" : "来源：powershell-run 代码块";
-        const output = `${sourceNote}\n$ ${commandText}\n${result.output}\n退出码：${result.code}`;
+        const taskNote = result.terminalTask ? `终端任务：${result.terminalTask.id}` : "";
+        const output = `${sourceNote}\n${taskNote ? `${taskNote}\n` : ""}$ ${commandText}\n${result.output}\n${result.longRunning ? "状态：仍在终端任务中运行" : `退出码：${result.code}`}`;
         resultLines.push(output);
       } catch (error) {
         const message = error instanceof Error ? error.message : "AI PowerShell 执行失败";
@@ -1216,7 +1366,7 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
         ...baseMessages,
         {
           role: "assistant",
-          content: `文件操作自动执行失败：${message}\n\n你仍然可以在变更预览里手动执行，或者让我改成别的写法。`,
+          content: `文件操作自动执行失败：${message}\n\n我已保留这次文件操作，你可以点底部工具栏的“执行文件操作”按钮手动确认，或者让我改成别的写法。`,
         },
       ];
       setMessages(nextMessages);
@@ -1591,13 +1741,13 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
           )}
 
           <div className="bottom-grid" aria-hidden={isBottomCollapsed}>
-            <div className="diff-panel">
+            <div className="terminal-panel">
               <div className="mini-heading split-heading">
                 <span>
-                  <PanelRight size={16} />
-                  变更预览
+                  <Play size={16} />
+                  终端任务
                 </span>
-                <div className="patch-actions">
+                <div className="terminal-actions">
                   <button onClick={undoPatch} disabled={!canUndoPatch || isLoading} title="撤销上次补丁">
                     <RotateCcw size={14} />
                   </button>
@@ -1607,16 +1757,67 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
                   <button onClick={askApplyFileOps} disabled={!fileOpsPreview.length || !project || isLoading} title="执行文件操作">
                     <Plus size={14} />
                   </button>
+                  <button onClick={copyTerminalOutput} disabled={!activeTerminalTask?.output} title="复制输出">
+                    <Copy size={14} />
+                  </button>
                   <button className="panel-collapse-button mini" onClick={() => setIsBottomCollapsed(true)} title="隐藏底部工具区">
                     <ChevronsDown size={14} />
                   </button>
                 </div>
               </div>
-              <pre className="diff-output">
-                {patchPreview ||
-                  formatFileOps(fileOpsPreview) ||
-                  "当模型返回 ```diff 或 ```fileops 代码块时，这里会自动抽取展示；项目内的 fileops 创建、覆盖、删除会尽量自动执行。"}
-              </pre>
+              <div className="terminal-command-row">
+                <input
+                  value={terminalCommand}
+                  onChange={(event) => setTerminalCommand(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void startTerminalTask();
+                  }}
+                  placeholder="npm run dev"
+                  disabled={!project}
+                  aria-label="终端命令"
+                />
+                <button className="terminal-primary" onClick={startTerminalTask} disabled={!project || !terminalCommand.trim()}>
+                  <Play size={14} />
+                  启动
+                </button>
+                <button onClick={stopActiveTerminalTask} disabled={!activeTerminalTask || activeTerminalTask.status !== "running"}>
+                  <Square size={14} />
+                  停止
+                </button>
+                <button onClick={restartActiveTerminalTask} disabled={!activeTerminalTask}>
+                  <RotateCw size={14} />
+                  重启
+                </button>
+              </div>
+              <div className="terminal-body">
+                <div className="terminal-task-list">
+                  {terminalTasks.length ? (
+                    terminalTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        className={`terminal-task ${task.id === activeTerminalTask?.id ? "active" : ""}`}
+                        onClick={() => setActiveTerminalTaskId(task.id)}
+                        title={task.command}
+                      >
+                        <span className={`terminal-dot ${task.status}`} />
+                        <strong>{task.title}</strong>
+                        <small>{formatTerminalStatus(task)}</small>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="terminal-empty">暂无终端任务</div>
+                  )}
+                </div>
+                <pre className="terminal-output">
+                  {activeTerminalTask
+                    ? activeTerminalTask.output || `${activeTerminalTask.command}\n\n任务已启动，等待输出...`
+                    : "启动长期服务或后台命令后，这里会实时显示输出。AI 返回的 diff/fileops 仍可用右上角按钮处理。"}
+                </pre>
+              </div>
+              <div className="terminal-footer">
+                <span>{runningTerminalTaskCount} 个运行中</span>
+                <span>{activeTerminalTask ? activeTerminalTask.cwd : project ? project.root : "未打开项目"}</span>
+              </div>
             </div>
           </div>
         </section>
@@ -1917,7 +2118,9 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
                       ? "补丁确认"
                       : confirmDialog.type === "fileops"
                         ? "文件操作确认"
-                        : "系统动作确认"}
+                        : confirmDialog.type === "admin-request"
+                          ? "管理员授权"
+                          : "系统动作确认"}
                 </span>
                 <h2>
                   {confirmDialog.type === "command"
@@ -1926,7 +2129,9 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
                       ? "确认应用代码补丁"
                       : confirmDialog.type === "fileops"
                         ? "确认执行文件操作"
-                        : `确认${confirmDialog.label}`}
+                        : confirmDialog.type === "admin-request"
+                          ? "需要管理员模式"
+                          : `确认${confirmDialog.label}`}
                 </h2>
               </div>
               <TriangleAlert size={23} />
@@ -1964,6 +2169,14 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
                   ))}
                 </ul>
               </>
+            ) : confirmDialog.type === "admin-request" ? (
+              <>
+                <p className="confirm-copy">
+                  {confirmDialog.source === "ai" ? "AI 请求执行的命令" : "你准备执行的命令"}
+                  可能需要管理员权限：{confirmDialog.reason}。确认后 Novayxk 会触发 Windows UAC 并以管理员模式重启；当前命令不会在重启前自动执行。
+                </p>
+                <pre className="confirm-preview">{confirmDialog.command}</pre>
+              </>
             ) : (
               <>
                 <p className="confirm-copy">
@@ -1978,7 +2191,9 @@ Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。�
               <button
                 className="ghost-button"
                 onClick={() => {
-                  if (confirmDialog.type === "system-action") confirmDialog.resolve(false);
+                  if (confirmDialog.type === "system-action" || confirmDialog.type === "admin-request") {
+                    confirmDialog.resolve(false);
+                  }
                   setConfirmDialog(null);
                 }}
               >
@@ -2272,7 +2487,7 @@ function summarizeTaskForUi(messages: ChatMessage[]) {
   const userMessages = messages
     .filter((message) => message.role === "user")
     .slice(-6)
-    .map((message) => stripContext(message.content).trim())
+    .map((message) => stripInjectedContext(message.content).trim())
     .filter(Boolean);
   return userMessages.length ? `最近任务重点：${userMessages.join("；").slice(0, 1200)}` : "";
 }
@@ -2282,14 +2497,39 @@ function formatTaskLabel(task: TaskSummary) {
   return date ? `${task.title} · ${date}` : task.title;
 }
 
+function buildModelChatHistory(messages: ChatMessage[], latestContext: string) {
+  const cleanMessages = sanitizeChatHistory(messages);
+  if (!latestContext.trim() || cleanMessages.length === 0) return cleanMessages;
+  const lastIndex = cleanMessages.length - 1;
+  return cleanMessages.map((message, index) => {
+    if (index !== lastIndex || message.role !== "user") return message;
+    return {
+      ...message,
+      content: `${stripInjectedContext(message.content)}${latestContext}`,
+    };
+  });
+}
+
 function stripContext(content: string) {
-  const marker = "\n\n当前选中文件：";
-  const index = content.indexOf(marker);
-  return index > -1 ? content.slice(0, index) : content;
+  return stripInjectedContext(content);
+}
+
+function stripInjectedContext(content: string) {
+  const markers = ["\n\n当前选中文件：", "\n\n项目上下文摘要："];
+  const indexes = markers
+    .map((marker) => content.indexOf(marker))
+    .filter((index) => index > -1);
+  return indexes.length ? content.slice(0, Math.min(...indexes)) : content;
 }
 
 function sanitizeChatHistory(messages: ChatMessage[]) {
-  return messages.filter((message) => !isAbortPlaceholderMessage(message));
+  return messages
+    .filter((message) => !isAbortPlaceholderMessage(message))
+    .map((message) => (
+      message.role === "user"
+        ? { ...message, content: stripInjectedContext(message.content).trim() }
+        : message
+    ));
 }
 
 function isAbortPlaceholderMessage(message: ChatMessage) {
@@ -2518,6 +2758,18 @@ function findTreeNode(nodes: FileNode[], targetPath: string): FileNode | null {
     }
   }
   return null;
+}
+
+function upsertTerminalTask(tasks: TerminalTask[], task: TerminalTask) {
+  const next = tasks.filter((item) => item.id !== task.id);
+  return [task, ...next].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
+}
+
+function formatTerminalStatus(task: TerminalTask) {
+  if (task.status === "running") return "运行中";
+  if (task.status === "stopped") return "已停止";
+  if (task.status === "failed") return `失败 ${task.code ?? ""}`.trim();
+  return `退出 ${task.code ?? 0}`;
 }
 
 function collectDirectoryPaths(nodes: FileNode[]): string[] {

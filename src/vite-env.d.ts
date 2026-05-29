@@ -97,6 +97,25 @@ export type FileOperation =
       overwrite?: boolean;
     };
 
+export type TerminalTask = {
+  id: string;
+  title: string;
+  command: string;
+  cwd: string;
+  status: "running" | "exited" | "failed" | "stopped";
+  code: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  output: string;
+};
+
+export type TerminalTaskUpdate = {
+  event: string;
+  task: TerminalTask;
+  chunk?: string;
+  stream?: "stdout" | "stderr";
+};
+
 declare global {
   interface Window {
     novayxk?: {
@@ -115,18 +134,43 @@ declare global {
       inspectCommand: (command: string) => Promise<{
         allowed: boolean;
         reason: string;
+        requiresAdmin?: boolean;
+        adminReason?: string;
         requiresConfirmation?: boolean;
         systemAction?: {
           action: string;
           label: string;
         };
       }>;
-      runCommand: (command: string) => Promise<{ code: number; output: string }>;
+      runCommand: (command: string) => Promise<{
+        code: number;
+        output: string;
+        terminalTask?: TerminalTask;
+        longRunning?: boolean;
+      }>;
       runCommandWithMode: (request: {
         command: string;
         controlMode: "safe" | "full";
         confirmedSystemAction?: boolean;
-      }) => Promise<{ code: number; output: string; command: string; controlMode: "safe" | "full"; bypassedDangerCheck: boolean }>;
+      }) => Promise<{
+        code: number;
+        output: string;
+        command: string;
+        controlMode: "safe" | "full";
+        bypassedDangerCheck: boolean;
+        terminalTask?: TerminalTask;
+        longRunning?: boolean;
+      }>;
+      startTerminalTask: (request: {
+        command: string;
+        title?: string;
+        controlMode: "safe" | "full";
+        confirmedSystemAction?: boolean;
+      }) => Promise<TerminalTask>;
+      stopTerminalTask: (taskId: string) => Promise<TerminalTask>;
+      restartTerminalTask: (taskId: string) => Promise<TerminalTask>;
+      listTerminalTasks: () => Promise<TerminalTask[]>;
+      onTerminalTaskUpdate: (handler: (payload: TerminalTaskUpdate) => void) => () => void;
       getProjectMemoryState: () => Promise<ProjectMemoryState>;
       saveProjectMemory: (memory: string) => Promise<ProjectMemoryState>;
       saveTask: (task: {

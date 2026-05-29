@@ -40,6 +40,15 @@ contextBridge.exposeInMainWorld("novayxk", {
   inspectCommand: (command) => ipcRenderer.invoke("project:inspectCommand", command),
   runCommand: (command) => ipcRenderer.invoke("project:runCommand", command),
   runCommandWithMode: (request) => ipcRenderer.invoke("project:runCommandWithMode", request),
+  startTerminalTask: (request) => ipcRenderer.invoke("terminal:start", request),
+  stopTerminalTask: (taskId) => ipcRenderer.invoke("terminal:stop", taskId),
+  restartTerminalTask: (taskId) => ipcRenderer.invoke("terminal:restart", taskId),
+  listTerminalTasks: () => ipcRenderer.invoke("terminal:list"),
+  onTerminalTaskUpdate: (handler) => {
+    const listener = (_event, payload) => handler?.(payload);
+    ipcRenderer.on("terminal:taskUpdate", listener);
+    return () => ipcRenderer.removeListener("terminal:taskUpdate", listener);
+  },
   getProjectMemoryState: () => ipcRenderer.invoke("memory:getProjectState"),
   saveProjectMemory: (memory) => ipcRenderer.invoke("memory:saveProjectMemory", memory),
   saveTask: (task) => ipcRenderer.invoke("memory:saveTask", task),

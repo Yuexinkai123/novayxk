@@ -42,6 +42,9 @@ const PROJECT_CONTEXT_FILE_LIMIT = 420;
 const PROJECT_CONTEXT_RELATED_LIMIT = 6;
 const PROJECT_CONTEXT_RELATED_BYTES = 28_000;
 const PROJECT_WALK_DEPTH_LIMIT = 12;
+const MAX_TERMINAL_OUTPUT_BYTES = 80_000;
+const MAX_TERMINAL_TASKS = 20;
+const TERMINAL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 const TEXT_FILE_EXTENSIONS = new Set([
   ".cjs",
   ".css",
@@ -84,11 +87,21 @@ const SYSTEM_ACTION_COMMANDS = [
   { action: "sleep", label: "睡眠", pattern: /\brundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\b/i },
   { action: "lock", label: "锁屏", pattern: /\brundll32(\.exe)?\s+user32\.dll,\s*lockworkstation\b/i },
 ];
+const ADMIN_REQUIRED_COMMANDS = [
+  { label: "系统服务管理", pattern: /\b(?:sc(?:\.exe)?\s+(?:create|delete|config|start|stop)|new-service|set-service|start-service|stop-service|restart-service)\b/i },
+  { label: "注册表系统分支修改", pattern: /\breg(?:\.exe)?\s+(?:add|delete|import|restore|save|copy)\s+HK(?:LM|CR|U|CC)\\/i },
+  { label: "Windows 权限或防火墙修改", pattern: /\b(?:netsh\s+advfirewall|set-executionpolicy|bcdedit|takeown|icacls)\b/i },
+  { label: "系统目录写入", pattern: /\b(?:copy|move|remove-item|rm|del|mkdir|new-item|set-content|add-content)\b[\s\S]*(?:C:\\Windows|C:\\Program Files|C:\\ProgramData)/i },
+  { label: "软件包安装或卸载", pattern: /\b(?:winget|choco|scoop)\s+(?:install|uninstall|upgrade)|\bmsiexec(?:\.exe)?\b/i },
+  { label: "进程强制结束", pattern: /\btaskkill(?:\.exe)?\b[\s\S]*\s\/f\b/i },
+  { label: "PowerShell 管理员启动", pattern: /\bstart-process\b[\s\S]*\b-verb\s+runas\b/i },
+];
 
 let mainWindow;
 let activeProjectRoot = null;
 const patchTransactions = [];
 const activeChatStreams = new Map();
+const terminalTasks = new Map();
 let pendingUninstallCleanup = null;
 let hasStartedUninstallCleanup = false;
 let cachedAdminState = null;
@@ -284,9 +297,7 @@ function createTaskId() {
 function titleFromMessages(messages) {
   const firstUserMessage = Array.isArray(messages) ? messages.find((message) => message?.role === "user") : null;
   const raw = firstUserMessage?.content ?? "新任务";
-  return raw
-    .replace(/\n\n当前选中文件：[\s\S]*$/, "")
-    .replace(/\s+/g, " ")
+  return stripInjectedContext(raw).replace(/\s+/g, " ")
     .trim()
     .slice(0, 36) || "新任务";
 }
@@ -296,10 +307,18 @@ function summarizeMessages(messages) {
   const userMessages = messages
     .filter((message) => message?.role === "user")
     .slice(-6)
-    .map((message) => message.content.replace(/\n\n当前选中文件：[\s\S]*$/, "").trim())
+    .map((message) => stripInjectedContext(message.content).trim())
     .filter(Boolean);
   if (!userMessages.length) return "";
   return `最近任务重点：${userMessages.join("；").slice(0, 1200)}`;
+}
+
+function stripInjectedContext(content) {
+  const text = String(content ?? "");
+  const indexes = ["\n\n当前选中文件：", "\n\n项目上下文摘要："]
+    .map((marker) => text.indexOf(marker))
+    .filter((index) => index > -1);
+  return indexes.length ? text.slice(0, Math.min(...indexes)) : text;
 }
 
 async function ensureProjectMemoryRoot(projectRoot = activeProjectRoot) {
@@ -391,7 +410,9 @@ async function saveTaskHistory(taskInput) {
   if (messages.length > 300) throw new Error("任务消息太多，请新建一个任务继续。");
   const normalizedMessages = messages.map((message) => ({
     role: message.role,
-    content: String(message.content ?? "").slice(0, 80_000),
+    content: (message.role === "user"
+      ? stripInjectedContext(message.content)
+      : String(message.content ?? "")).slice(0, 80_000),
     ...(Number.isFinite(message.elapsedMs) && message.elapsedMs >= 0
       ? { elapsedMs: Math.round(message.elapsedMs) }
       : {}),
@@ -423,6 +444,7 @@ function inspectCommand(command) {
   if (!normalized) {
     return { allowed: false, reason: "命令为空。" };
   }
+  const adminRequirement = detectAdminRequirement(normalized);
   const systemAction = detectSystemAction(normalized);
   if (systemAction) {
     return {
@@ -430,18 +452,31 @@ function inspectCommand(command) {
       reason: `${systemAction.label}属于特殊系统动作，需要你手动确认。`,
       requiresConfirmation: true,
       systemAction,
+      ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
     };
   }
   if (normalized.length > MAX_SAFE_COMMAND_LENGTH) {
-    return { allowed: false, reason: `命令过长，安全模式下请控制在 ${MAX_SAFE_COMMAND_LENGTH} 字符内。` };
+    return {
+      allowed: false,
+      reason: `命令过长，安全模式下请控制在 ${MAX_SAFE_COMMAND_LENGTH} 字符内。`,
+      ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
+    };
   }
 
   const hit = DANGEROUS_COMMANDS.find((item) => item.pattern.test(normalized));
   if (hit) {
-    return { allowed: false, reason: hit.reason };
+    return {
+      allowed: false,
+      reason: hit.reason,
+      ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
+    };
   }
 
-  return { allowed: true, reason: "" };
+  return {
+    allowed: true,
+    reason: "",
+    ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
+  };
 }
 
 function inspectCommandForMode(command, controlMode = "safe") {
@@ -449,6 +484,7 @@ function inspectCommandForMode(command, controlMode = "safe") {
   if (!normalized) {
     return { allowed: false, reason: "命令为空。" };
   }
+  const adminRequirement = detectAdminRequirement(normalized);
   const systemAction = detectSystemAction(normalized);
   if (systemAction) {
     return {
@@ -456,14 +492,23 @@ function inspectCommandForMode(command, controlMode = "safe") {
       reason: `${systemAction.label}属于特殊系统动作，需要你手动确认。`,
       requiresConfirmation: true,
       systemAction,
+      ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
     };
   }
   if (normalized.length > MAX_FULL_COMMAND_LENGTH) {
-    return { allowed: false, reason: `命令过长，请控制在 ${MAX_FULL_COMMAND_LENGTH} 字符内。` };
+    return {
+      allowed: false,
+      reason: `命令过长，请控制在 ${MAX_FULL_COMMAND_LENGTH} 字符内。`,
+      ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
+    };
   }
 
   if (controlMode === "full") {
-    return { allowed: true, reason: "完全控制模式已开启，危险命令拦截已跳过。" };
+    return {
+      allowed: true,
+      reason: "完全控制模式已开启，危险命令拦截已跳过。",
+      ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
+    };
   }
 
   return inspectCommand(normalized);
@@ -475,6 +520,15 @@ function detectSystemAction(command) {
   if (!hit) return null;
   return {
     action: hit.action,
+    label: hit.label,
+  };
+}
+
+function detectAdminRequirement(command) {
+  const normalized = String(command ?? "").trim();
+  const hit = ADMIN_REQUIRED_COMMANDS.find((item) => item.pattern.test(normalized));
+  if (!hit) return null;
+  return {
     label: hit.label,
   };
 }
@@ -1282,56 +1336,273 @@ async function writeConfig(config) {
   return config;
 }
 
-function runCommand(command, cwd) {
-  return new Promise((resolve) => {
-    const startedAt = Date.now();
-    const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
-    const tempScriptPath = process.platform === "win32"
-      ? path.join(os.tmpdir(), `novayxk-command-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.ps1`)
-      : "";
-    const args = process.platform === "win32"
-      ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempScriptPath]
-      : ["-lc", command];
-    if (process.platform === "win32") {
-      const utf8Bom = Buffer.from([0xef, 0xbb, 0xbf]);
-      const prelude = [
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-        "$OutputEncoding = [System.Text.Encoding]::UTF8",
-        "",
-      ].join(os.EOL);
-      fsSync.writeFileSync(tempScriptPath, Buffer.concat([utf8Bom, Buffer.from(`${prelude}${command}`, "utf8")]));
-    }
-    const child = childProcess.spawn(shell, args, {
-      cwd,
-      env: process.env,
-      windowsHide: true,
-    });
-    let output = "";
+function startTerminalTask(command, options = {}) {
+  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  const normalized = String(command ?? "").trim();
+  if (!normalized) throw new Error("命令为空。");
+  if (normalized.length > MAX_FULL_COMMAND_LENGTH) throw new Error(`命令过长，请控制在 ${MAX_FULL_COMMAND_LENGTH} 字符内。`);
 
-    child.stdout.on("data", (chunk) => {
-      output += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      output += chunk.toString();
-    });
-    child.on("close", (code) => {
-      if (tempScriptPath) {
-        fsSync.rmSync(tempScriptPath, { force: true });
-      }
-      const effectiveCode = normalizePowerShellExitCode(code, output);
-      logApp(effectiveCode === 0 ? "command:completed" : "command:failed", {
-        cwd,
-        code: effectiveCode,
-        originalCode: code,
-        elapsedMs: Date.now() - startedAt,
-        commandPreview: String(command).slice(0, 500),
-      }, effectiveCode === 0 ? "info" : "warn");
-      resolve({
-        code: effectiveCode,
-        output: output.slice(-20000),
-      });
-    });
+  const id = `term-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const task = {
+    id,
+    command: normalized,
+    cwd: activeProjectRoot,
+    title: String(options.title || titleFromCommand(normalized)).slice(0, 80),
+    status: "running",
+    code: null,
+    startedAt: new Date().toISOString(),
+    endedAt: null,
+    output: "",
+    child: null,
+    doneListeners: [],
+  };
+
+  const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
+  const tempScriptPath = process.platform === "win32"
+    ? path.join(os.tmpdir(), `novayxk-terminal-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.ps1`)
+    : "";
+  const args = process.platform === "win32"
+    ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempScriptPath]
+    : ["-lc", normalized];
+
+  if (process.platform === "win32") {
+    const utf8Bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const prelude = [
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+      "$OutputEncoding = [System.Text.Encoding]::UTF8",
+      "",
+    ].join(os.EOL);
+    fsSync.writeFileSync(tempScriptPath, Buffer.concat([utf8Bom, Buffer.from(`${prelude}${normalized}`, "utf8")]));
+  }
+
+  const child = childProcess.spawn(shell, args, {
+    cwd: activeProjectRoot,
+    env: process.env,
+    windowsHide: true,
   });
+  task.child = child;
+  task.tempScriptPath = tempScriptPath;
+  terminalTasks.set(id, task);
+  trimTerminalTasks();
+  emitTerminalTaskUpdate(task, "started");
+
+  const appendOutput = (chunk, stream) => {
+    const text = chunk.toString();
+    task.output = trimTerminalOutput(`${task.output}${text}`);
+    emitTerminalTaskUpdate(task, "output", { chunk: text, stream });
+  };
+
+  child.stdout.on("data", (chunk) => appendOutput(chunk, "stdout"));
+  child.stderr.on("data", (chunk) => appendOutput(chunk, "stderr"));
+  child.on("error", (error) => {
+    task.status = "failed";
+    task.code = 1;
+    task.endedAt = new Date().toISOString();
+    task.output = trimTerminalOutput(`${task.output}\n${error.message}`);
+    cleanupTerminalTask(task);
+    emitTerminalTaskUpdate(task, "error");
+    notifyTerminalTaskDone(task);
+  });
+  child.on("close", (code) => {
+    if (task.status === "stopped") {
+      task.code = code ?? 1;
+    } else {
+      const effectiveCode = normalizePowerShellExitCode(code, task.output);
+      task.code = effectiveCode;
+      task.status = effectiveCode === 0 ? "exited" : "failed";
+    }
+    task.endedAt = new Date().toISOString();
+    cleanupTerminalTask(task);
+    emitTerminalTaskUpdate(task, "closed");
+    notifyTerminalTaskDone(task);
+    void openProjectRefreshAfterTerminal();
+    logApp(task.code === 0 ? "terminal:completed" : "terminal:finished", {
+      taskId: task.id,
+      commandPreview: task.command.slice(0, 500),
+      cwd: task.cwd,
+      code: task.code,
+      status: task.status,
+    }, task.code === 0 ? "info" : "warn");
+  });
+
+  logApp("terminal:started", {
+    taskId: id,
+    cwd: task.cwd,
+    commandPreview: normalized.slice(0, 500),
+  });
+
+  return serializeTerminalTask(task);
+}
+
+function runCommandAsTerminalTask(command, options = {}) {
+  const startedTask = startTerminalTask(command, {
+    title: options.title || titleFromCommand(command),
+  });
+  return waitForTerminalTask(startedTask.id, options.timeoutMs ?? TERMINAL_WAIT_TIMEOUT_MS).then((finishedTask) => {
+    const serializedTask = serializeTerminalTask(finishedTask);
+    const stillRunning = serializedTask.status === "running";
+    const output = stillRunning
+      ? `${serializedTask.output.slice(-18000)}\n\n命令仍在终端任务中运行，后续输出会继续显示在底部“终端任务”面板。`.trim()
+      : serializedTask.output.slice(-20000);
+    return {
+      code: stillRunning ? 0 : serializedTask.code ?? 1,
+      output,
+      task: serializedTask,
+      longRunning: stillRunning,
+    };
+  });
+}
+
+function waitForTerminalTask(taskId, timeoutMs) {
+  return new Promise((resolve) => {
+    const task = terminalTasks.get(taskId);
+    if (!task || task.status !== "running") {
+      resolve(task ?? { id: taskId, code: 1, output: "", status: "failed" });
+      return;
+    }
+
+    let timeout = null;
+    const onDone = () => {
+      clearTimeout(timeout);
+      task.doneListeners = task.doneListeners.filter((listener) => listener !== onDone);
+      resolve(terminalTasks.get(taskId) ?? task);
+    };
+    timeout = setTimeout(() => {
+      task.doneListeners = task.doneListeners.filter((listener) => listener !== onDone);
+      resolve(terminalTasks.get(taskId) ?? task);
+    }, timeoutMs);
+    task.doneListeners.push(onDone);
+  });
+}
+
+function notifyTerminalTaskDone(task) {
+  const listeners = [...(task.doneListeners ?? [])];
+  task.doneListeners = [];
+  for (const listener of listeners) listener();
+}
+
+function stopTerminalTask(taskId) {
+  const task = terminalTasks.get(String(taskId ?? ""));
+  if (!task) throw new Error("终端任务不存在。");
+  if (!task.child || task.status !== "running") return serializeTerminalTask(task);
+  task.status = "stopped";
+  task.endedAt = new Date().toISOString();
+  try {
+    if (process.platform === "win32") {
+      childProcess.spawn("taskkill.exe", ["/pid", String(task.child.pid), "/t", "/f"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } else {
+      task.child.kill("SIGTERM");
+    }
+  } catch {
+    try {
+      task.child.kill();
+    } catch {
+      // Ignore kill races; close/error events will settle the task.
+    }
+  }
+  emitTerminalTaskUpdate(task, "stopping");
+  return serializeTerminalTask(task);
+}
+
+function restartTerminalTask(taskId) {
+  const task = terminalTasks.get(String(taskId ?? ""));
+  if (!task) throw new Error("终端任务不存在。");
+  const command = task.command;
+  const title = task.title;
+  if (task.status === "running") stopTerminalTask(task.id);
+  return startTerminalTask(command, { title });
+}
+
+function listTerminalTasks() {
+  return [...terminalTasks.values()].map(serializeTerminalTask);
+}
+
+function serializeTerminalTask(task) {
+  return {
+    id: task.id,
+    title: task.title,
+    command: task.command,
+    cwd: task.cwd,
+    status: task.status,
+    code: task.code,
+    startedAt: task.startedAt,
+    endedAt: task.endedAt,
+    output: task.output,
+  };
+}
+
+function emitTerminalTaskUpdate(task, eventName, extra = {}) {
+  mainWindow?.webContents?.send("terminal:taskUpdate", {
+    event: eventName,
+    task: serializeTerminalTask(task),
+    ...extra,
+  });
+}
+
+function cleanupTerminalTask(task) {
+  task.child = null;
+  if (task.tempScriptPath) {
+    try {
+      fsSync.rmSync(task.tempScriptPath, { force: true });
+    } catch {
+      // Ignore temp script cleanup failures.
+    }
+    task.tempScriptPath = "";
+  }
+}
+
+function trimTerminalOutput(output) {
+  const text = String(output ?? "");
+  if (Buffer.byteLength(text, "utf8") <= MAX_TERMINAL_OUTPUT_BYTES) return text;
+  return text.slice(-MAX_TERMINAL_OUTPUT_BYTES);
+}
+
+function trimTerminalTasks() {
+  const tasks = [...terminalTasks.values()];
+  if (tasks.length <= MAX_TERMINAL_TASKS) return;
+  const removable = tasks
+    .filter((task) => task.status !== "running")
+    .sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
+  for (const task of removable.slice(0, Math.max(0, tasks.length - MAX_TERMINAL_TASKS))) {
+    terminalTasks.delete(task.id);
+  }
+}
+
+function titleFromCommand(command) {
+  return String(command ?? "").replace(/\s+/g, " ").trim().slice(0, 48) || "PowerShell 任务";
+}
+
+function isLikelyLongRunningCommand(command) {
+  const normalized = String(command ?? "").trim();
+  if (!normalized) return false;
+  return [
+    /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve|preview|watch)(?=\s|$|:)/i,
+    /\b(?:vite|webpack-dev-server|nodemon|ts-node-dev|electron\s+\.|cargo\s+watch)\b/i,
+    /\b(?:next|nuxt|astro|remix)\s+dev\b/i,
+    /\b(?:webpack\s+serve|parcel\s+(?:serve|watch)|tauri\s+dev)\b/i,
+    /\b(?:tsc|jest|vitest)\b[\s\S]*\s--watch\b/i,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function formatStartedTerminalTaskOutput(task) {
+  return [
+    `命令已作为终端任务启动：${task.title}`,
+    `任务 ID：${task.id}`,
+    `工作目录：${task.cwd}`,
+    "输出会在底部“终端任务”面板实时显示。",
+  ].join("\n");
+}
+
+async function openProjectRefreshAfterTerminal() {
+  if (!activeProjectRoot) return;
+  try {
+    mainWindow?.webContents?.send("project:maybeChanged");
+  } catch {
+    // Renderer may be gone while a terminal task exits.
+  }
 }
 
 function normalizePowerShellExitCode(code, output) {
@@ -1873,7 +2144,22 @@ ipcMain.handle("project:runCommand", async (_event, command) => {
     }, "warn");
     throw new Error(`命令已被拦截：${inspection.reason}`);
   }
-  return runCommand(command, activeProjectRoot);
+  if (isLikelyLongRunningCommand(command)) {
+    const task = startTerminalTask(command);
+    return {
+      code: 0,
+      output: formatStartedTerminalTaskOutput(task),
+      terminalTask: task,
+      longRunning: true,
+    };
+  }
+  const result = await runCommandAsTerminalTask(command);
+  return {
+    code: result.code,
+    output: result.output,
+    terminalTask: result.task,
+    longRunning: result.longRunning,
+  };
 });
 
 ipcMain.handle("project:runCommandWithMode", async (_event, request) => {
@@ -1902,14 +2188,52 @@ ipcMain.handle("project:runCommandWithMode", async (_event, request) => {
     }
     throw error;
   }
-  const result = await runCommand(command, activeProjectRoot);
+  if (isLikelyLongRunningCommand(command)) {
+    const task = startTerminalTask(command, { title: request?.title });
+    return {
+      code: 0,
+      output: formatStartedTerminalTaskOutput(task),
+      command,
+      controlMode,
+      bypassedDangerCheck: controlMode === "full",
+      terminalTask: task,
+      longRunning: true,
+    };
+  }
+  const result = await runCommandAsTerminalTask(command, { title: request?.title });
   return {
-    ...result,
+    code: result.code,
+    output: result.output,
     command,
     controlMode,
     bypassedDangerCheck: controlMode === "full",
+    terminalTask: result.task,
+    longRunning: result.longRunning,
   };
 });
+
+ipcMain.handle("terminal:start", async (_event, request) => {
+  const command = String(request?.command ?? "").trim();
+  const mode = request?.controlMode === "full" ? "full" : "safe";
+  const inspection = request?.confirmedSystemAction === true
+    ? { allowed: true, reason: "特殊系统动作已由用户确认。" }
+    : inspectCommandForMode(command, mode);
+  if (!inspection.allowed) {
+    const error = new Error(`命令已被拦截：${inspection.reason}`);
+    if (inspection.requiresConfirmation) {
+      error.code = "SYSTEM_ACTION_CONFIRMATION_REQUIRED";
+      error.systemAction = inspection.systemAction;
+    }
+    throw error;
+  }
+  return startTerminalTask(command, { title: request?.title });
+});
+
+ipcMain.handle("terminal:stop", async (_event, taskId) => stopTerminalTask(taskId));
+
+ipcMain.handle("terminal:restart", async (_event, taskId) => restartTerminalTask(taskId));
+
+ipcMain.handle("terminal:list", async () => listTerminalTasks());
 
 ipcMain.handle("memory:getProjectState", async () => {
   if (!activeProjectRoot) throw new Error("请先打开一个项目。");
