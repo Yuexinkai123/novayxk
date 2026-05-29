@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("novayxk", {
   runCommandWithMode: (request) => ipcRenderer.invoke("project:runCommandWithMode", request),
   startTerminalTask: (request) => ipcRenderer.invoke("terminal:start", request),
   stopTerminalTask: (taskId) => ipcRenderer.invoke("terminal:stop", taskId),
+  writeTerminalInput: (taskId, input) => ipcRenderer.invoke("terminal:write", { taskId, input }),
   restartTerminalTask: (taskId) => ipcRenderer.invoke("terminal:restart", taskId),
   listTerminalTasks: () => ipcRenderer.invoke("terminal:list"),
   onTerminalTaskUpdate: (handler) => {

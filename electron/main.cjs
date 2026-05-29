@@ -188,18 +188,41 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
-  createWindow();
-});
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+  writeDebugLog("window:focusExisting", { source: "electron-main" });
+  logApp("window:focusExisting");
+  return true;
+}
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+const hasSingleInstanceLock = isUninstallMode || app.requestSingleInstanceLock();
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
+if (!hasSingleInstanceLock) {
+  writeDebugLog("app:secondInstanceQuit", { source: "electron-main" });
+  app.quit();
+} else {
+  if (!isUninstallMode) {
+    app.on("second-instance", () => {
+      if (!focusMainWindow() && app.isReady()) createWindow();
+    });
+  }
+
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+}
 
 ipcMain.handle("window:minimize", () => {
   writeDebugLog("window:minimize", { source: "electron-main" });
@@ -315,7 +338,7 @@ function summarizeMessages(messages) {
 
 function stripInjectedContext(content) {
   const text = String(content ?? "");
-  const indexes = ["\n\n当前选中文件：", "\n\n项目上下文摘要："]
+  const indexes = ["\n\n当前选中文件：", "\n\n项目上下文摘要：", "\n\n运行上下文："]
     .map((marker) => text.indexOf(marker))
     .filter((index) => index > -1);
   return indexes.length ? text.slice(0, Math.min(...indexes)) : text;
@@ -1353,6 +1376,10 @@ function startTerminalTask(command, options = {}) {
     startedAt: new Date().toISOString(),
     endedAt: null,
     output: "",
+    needsInput: false,
+    userIntervened: false,
+    inputCount: 0,
+    lastInputAt: null,
     child: null,
     doneListeners: [],
   };
@@ -1389,6 +1416,9 @@ function startTerminalTask(command, options = {}) {
   const appendOutput = (chunk, stream) => {
     const text = chunk.toString();
     task.output = trimTerminalOutput(`${task.output}${text}`);
+    if (terminalOutputNeedsInput(task.output, text)) {
+      task.needsInput = true;
+    }
     emitTerminalTaskUpdate(task, "output", { chunk: text, stream });
   };
 
@@ -1412,6 +1442,7 @@ function startTerminalTask(command, options = {}) {
       task.status = effectiveCode === 0 ? "exited" : "failed";
     }
     task.endedAt = new Date().toISOString();
+    task.needsInput = false;
     cleanupTerminalTask(task);
     emitTerminalTaskUpdate(task, "closed");
     notifyTerminalTaskDone(task);
@@ -1475,6 +1506,19 @@ function waitForTerminalTask(taskId, timeoutMs) {
   });
 }
 
+function terminalOutputNeedsInput(output, latestChunk = "") {
+  const text = `${String(output ?? "").slice(-3000)}${String(latestChunk ?? "")}`.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  const tail = text.slice(-1200);
+  return [
+    /是否同意[\s\S]{0,180}\[[Yy]\][\s\S]{0,80}\[[Nn]\][\s\S]{0,60}[:：]\s*$/i,
+    /(?:do you accept|do you agree|continue|proceed|confirm)[\s\S]{0,220}(?:\[?[Yy][\/\\]?[Nn]\]?|yes\/no)[\s\S]{0,80}[:?]\s*$/i,
+    /(?:press|hit)\s+(?:enter|return|any key)[\s\S]{0,80}$/i,
+    /(?:按|输入).{0,20}(?:回车|任意键).{0,80}$/i,
+    /(?:password|passphrase|密码|口令|密钥).{0,80}[:：]\s*$/i,
+    /(?:\[Y\].*\[N\]|\[y\].*\[n\]|y\/n|yes\/no).{0,80}[:?]\s*$/i,
+  ].some((pattern) => pattern.test(tail));
+}
+
 function notifyTerminalTaskDone(task) {
   const listeners = [...(task.doneListeners ?? [])];
   task.doneListeners = [];
@@ -1507,6 +1551,27 @@ function stopTerminalTask(taskId) {
   return serializeTerminalTask(task);
 }
 
+function writeTerminalTaskInput(taskId, input) {
+  const task = terminalTasks.get(String(taskId ?? ""));
+  if (!task) throw new Error("终端任务不存在。");
+  if (!task.child || task.status !== "running") throw new Error("终端任务没有在运行，不能发送输入。");
+  if (!task.child.stdin || task.child.stdin.destroyed || !task.child.stdin.writable) {
+    throw new Error("当前终端任务不接受输入。");
+  }
+  const rawInput = String(input ?? "");
+  if (!rawInput.trim()) throw new Error("请输入要发送到终端任务的内容。");
+  if (rawInput.length > 2000) throw new Error("单次终端输入不能超过 2000 个字符。");
+  const line = rawInput.endsWith("\n") || rawInput.endsWith("\r") ? rawInput : `${rawInput}${os.EOL}`;
+  task.child.stdin.write(line, "utf8");
+  task.needsInput = false;
+  task.userIntervened = true;
+  task.inputCount = (task.inputCount ?? 0) + 1;
+  task.lastInputAt = new Date().toISOString();
+  task.output = trimTerminalOutput(`${task.output}\n[Novayxk 记录：用户已插手，并向当前终端任务发送了一行输入]\n`);
+  emitTerminalTaskUpdate(task, "input", { stream: "stdin" });
+  return serializeTerminalTask(task);
+}
+
 function restartTerminalTask(taskId) {
   const task = terminalTasks.get(String(taskId ?? ""));
   if (!task) throw new Error("终端任务不存在。");
@@ -1531,6 +1596,10 @@ function serializeTerminalTask(task) {
     startedAt: task.startedAt,
     endedAt: task.endedAt,
     output: task.output,
+    needsInput: task.needsInput === true,
+    userIntervened: task.userIntervened === true,
+    inputCount: task.inputCount ?? 0,
+    lastInputAt: task.lastInputAt ?? null,
   };
 }
 
@@ -2230,6 +2299,8 @@ ipcMain.handle("terminal:start", async (_event, request) => {
 });
 
 ipcMain.handle("terminal:stop", async (_event, taskId) => stopTerminalTask(taskId));
+
+ipcMain.handle("terminal:write", async (_event, request) => writeTerminalTaskInput(request?.taskId, request?.input));
 
 ipcMain.handle("terminal:restart", async (_event, taskId) => restartTerminalTask(taskId));
 

@@ -107,13 +107,17 @@ export type TerminalTask = {
   startedAt: string;
   endedAt: string | null;
   output: string;
+  needsInput?: boolean;
+  userIntervened?: boolean;
+  inputCount?: number;
+  lastInputAt?: string | null;
 };
 
 export type TerminalTaskUpdate = {
   event: string;
   task: TerminalTask;
   chunk?: string;
-  stream?: "stdout" | "stderr";
+  stream?: "stdout" | "stderr" | "stdin";
 };
 
 declare global {
@@ -168,6 +172,7 @@ declare global {
         confirmedSystemAction?: boolean;
       }) => Promise<TerminalTask>;
       stopTerminalTask: (taskId: string) => Promise<TerminalTask>;
+      writeTerminalInput: (taskId: string, input: string) => Promise<TerminalTask>;
       restartTerminalTask: (taskId: string) => Promise<TerminalTask>;
       listTerminalTasks: () => Promise<TerminalTask[]>;
       onTerminalTaskUpdate: (handler: (payload: TerminalTaskUpdate) => void) => () => void;
