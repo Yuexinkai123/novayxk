@@ -1,0 +1,42 @@
+{
+  "appId": "com.novayxk.installer",
+  "productName": "Novayxk Installer",
+  "copyright": "Copyright (C) 2026 Novayxk",
+  "directories": {
+    "output": "dist-custom-installer"
+  },
+  "files": [
+    "installer/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "name": "novayxk-installer",
+    "main": "installer/main.cjs"
+  },
+  "afterPack": "scripts/after-pack-installer.cjs",
+  "extraResources": [
+    {
+      "from": "assets/icons/novayxk.ico",
+      "to": "assets/novayxk.ico"
+    },
+    {
+      "from": "assets/icons/novayxk-256.png",
+      "to": "assets/novayxk-256.png"
+    },
+    {
+      "from": "dist-cleanup/Novayxk Cleanup.exe",
+      "to": "cleanup/Novayxk Cleanup.exe"
+    }
+  ],
+  "asar": true,
+  "win": {
+    "icon": "assets/icons/novayxk.ico",
+    "signAndEditExecutable": false,
+    "target": [
+      "portable"
+    ]
+  },
+  "portable": {
+    "artifactName": "Novayxk-Custom-Setup-${version}.${ext}"
+  }
+}

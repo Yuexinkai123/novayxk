@@ -1,0 +1,417 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Model Proxies | Novayxk</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=JetBrains+Mono:wght@100..800&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary": "#003824",
+                    "on-background": "#dae2fd",
+                    "surface-container-lowest": "#060e20",
+                    "inverse-surface": "#dae2fd",
+                    "on-primary": "#002e6a",
+                    "on-error": "#690005",
+                    "outline": "#8c909f",
+                    "inverse-on-surface": "#283044",
+                    "tertiary-fixed": "#ffdcc6",
+                    "primary-container": "#4d8eff",
+                    "primary-fixed-dim": "#adc6ff",
+                    "secondary": "#4edea3",
+                    "on-tertiary-fixed-variant": "#723600",
+                    "on-tertiary-fixed": "#311400",
+                    "primary-fixed": "#d8e2ff",
+                    "surface-bright": "#31394d",
+                    "surface-container-high": "#222a3d",
+                    "on-secondary-fixed": "#002113",
+                    "surface-tint": "#adc6ff",
+                    "on-error-container": "#ffdad6",
+                    "surface-container": "#171f33",
+                    "on-secondary-container": "#00311f",
+                    "tertiary-fixed-dim": "#ffb786",
+                    "on-surface": "#dae2fd",
+                    "error-container": "#93000a",
+                    "error": "#ffb4ab",
+                    "surface-dim": "#0b1326",
+                    "surface-container-low": "#131b2e",
+                    "tertiary": "#ffb786",
+                    "on-tertiary": "#502400",
+                    "on-primary-fixed": "#001a42",
+                    "on-tertiary-container": "#461f00",
+                    "secondary-fixed-dim": "#4edea3",
+                    "primary": "#adc6ff",
+                    "surface": "#0b1326",
+                    "on-surface-variant": "#c2c6d6",
+                    "tertiary-container": "#df7412",
+                    "secondary-container": "#00a572",
+                    "outline-variant": "#424754",
+                    "surface-variant": "#2d3449",
+                    "background": "#0b1326",
+                    "on-primary-fixed-variant": "#004395",
+                    "on-secondary-fixed-variant": "#005236",
+                    "on-primary-container": "#00285d",
+                    "inverse-primary": "#005ac2",
+                    "secondary-fixed": "#6ffbbe",
+                    "surface-container-highest": "#2d3449"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "container-padding": "12px",
+                    "gutter": "16px",
+                    "unit": "4px",
+                    "panel-gap": "1px",
+                    "margin-page": "24px"
+            },
+            "fontFamily": {
+                    "headline-md": ["Geist"],
+                    "label-caps": ["JetBrains Mono"],
+                    "body-sm": ["Geist"],
+                    "code-block": ["JetBrains Mono"],
+                    "body-lg": ["Geist"],
+                    "display-lg": ["Geist"]
+            },
+            "fontSize": {
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "500"}],
+                    "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                    "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "code-block": ["13px", {"lineHeight": "22px", "fontWeight": "400"}],
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "display-lg": ["40px", {"lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.5);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(59, 130, 246, 0.1);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #424754;
+            border-radius: 2px;
+        }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+            background: #8c909f;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-sm selection:bg-primary/30 antialiased overflow-hidden">
+<!-- SideNavBar -->
+<aside class="w-[280px] h-full fixed left-0 top-0 bg-surface-container border-r border-outline-variant flex flex-col py-margin-page z-[60]">
+<div class="px-gutter mb-8">
+<h1 class="font-headline-md text-headline-md font-bold text-primary">Novayxk</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Pro Workspace</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-gutter py-3 text-on-surface-variant font-medium hover:bg-surface-variant transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="chat">chat</span>
+<span class="">Chat</span>
+</a>
+<a class="flex items-center gap-3 px-gutter py-3 text-primary font-bold border-r-2 border-primary bg-surface-variant/30 transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="smart_toy">smart_toy</span>
+<span class="">Models</span>
+</a>
+<a class="flex items-center gap-3 px-gutter py-3 text-on-surface-variant font-medium hover:bg-surface-variant transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="book">book</span>
+<span class="">Prompt Library</span>
+</a>
+<a class="flex items-center gap-3 px-gutter py-3 text-on-surface-variant font-medium hover:bg-surface-variant transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="">Settings</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-outline-variant/30 space-y-1">
+<a class="flex items-center gap-3 px-gutter py-2 text-on-surface-variant font-medium hover:bg-surface-variant transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+<span class="">Help</span>
+</a>
+<a class="flex items-center gap-3 px-gutter py-2 text-on-surface-variant font-medium hover:bg-surface-variant transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="rate_review">rate_review</span>
+<span class="">Feedback</span>
+</a>
+<div class="px-gutter mt-4">
+<div class="flex items-center gap-3 p-2 rounded-lg bg-surface-variant/20 border border-outline-variant/30">
+<img alt="User Profile" class="w-8 h-8 rounded-full border border-primary/20" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDlcnpK1aN3Jaxn1DDGN0BHQ6VCBvPsFo8HFgyRHJAjSvst6J0jjkMBmM3o_ONIMlK3xPRxH5EU-cMXPehzFjMlE5M2GRDIRAIHHOjCiIqQA4GPA3tbNWX6J6zGfXjjHjioEujn_x4rNrhe1kotrGHkleqGU5-f-3YjEo1kaqOsYRfiu_Ad-HaHcvzg5F22qnM0WnEYVGwwFqeNqzsL2IIrKbDzna-EHnIf81xJZDWa2vgVNygzkTUPp4reRJTJ0tiPHpBIgAQHOY5_">
+<div class="overflow-hidden">
+<p class="font-label-caps text-label-caps text-on-surface truncate">ALEX_DEV_99</p>
+<p class="text-[10px] text-primary">TIER: ENTERPRISE</p>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- TopNavBar -->
+<header class="fixed top-0 right-0 left-[280px] h-16 z-50 flex justify-between items-center px-gutter bg-surface-dim/50 backdrop-blur-md border-b border-outline-variant">
+<div class="flex items-center gap-6">
+<span class="font-headline-md text-headline-md font-black text-on-surface">Novayxk</span>
+<div class="relative group">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-outline text-sm" data-icon="search">search</span>
+<input class="bg-background border border-outline-variant rounded-full pl-10 pr-4 py-1.5 text-body-sm w-64 focus:outline-none focus:border-primary transition-all" placeholder="Search proxies..." type="text">
+</div>
+</div>
+<nav class="flex items-center gap-8">
+<a class="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-all active:scale-95" href="#">Models</a>
+<a class="font-label-caps text-label-caps text-primary border-b-2 border-primary pb-1 active:scale-95" href="#">Workspace</a>
+<a class="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-all active:scale-95" href="#">History</a>
+</nav>
+<div class="flex items-center gap-4">
+<button class="bg-primary text-on-primary px-4 py-1.5 rounded-full font-label-caps text-label-caps hover:brightness-110 active:scale-95 transition-all">
+                Connect API
+            </button>
+<button class="text-on-surface-variant hover:text-primary transition-all relative">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-secondary rounded-full border-2 border-surface-dim"></span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-all">
+<span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Main Content -->
+<main class="ml-[280px] mt-16 pb-8 h-[calc(100vh-64px-32px)] overflow-y-auto custom-scrollbar">
+<div class="max-w-6xl mx-auto p-margin-page space-y-gutter">
+<!-- Page Title Area -->
+<div class="flex justify-between items-end pb-4 border-b border-outline-variant/30">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface font-bold">Model Proxies</h2>
+<p class="text-on-surface-variant mt-1">Manage global endpoint routing and authentication for multiple AI providers.</p>
+</div>
+<div class="flex items-center gap-4 bg-surface-container-high p-3 rounded-xl border border-outline-variant/50">
+<div class="flex flex-col items-end">
+<span class="font-label-caps text-label-caps text-secondary">GLOBAL PROXY STATUS</span>
+<span class="text-[10px] text-on-surface-variant">ACTIVE ON ALL WORKSPACES</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary"></div>
+</label>
+</div>
+</div>
+<!-- Bento Grid of Providers -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter">
+<!-- OpenAI Card -->
+<div class="glass-panel p-gutter rounded-xl hover:bg-surface-variant/40 transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center border border-white/20">
+<img alt="OpenAI" class="w-8 h-8 invert" data-alt="Minimalist vector logo of OpenAI on a dark transparent background, high tech aesthetic with glowing blue edges and crisp white icon details, professional tech company branding." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAolS3FwH1opEYxuDSHQL9PgptGN1GiM486t64tenSSUJLWPo3dhqBJ_U3Zk40KS0Mx6PE5PaWvF2XOn9TysGt9QYWa5NqMp1Q7mEyzub-hTN3nxtHQk81IiDHUqTri8v_OqpKiTkefx6OeAZOr2vQYC44VcxxXCjo1TBOWrLm26wtVr9LRlJ3E3y6pQmi9gIDE7Eae5ABVQ2i4qOcTornOiSMBhDDcot7EaboGINDn6FUV1Fw70otTewqathy6fTbRWNJK8uNq12R5">
+</div>
+<span class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-secondary/10 text-secondary font-label-caps text-[10px]">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full animate-pulse"></span>
+                            ONLINE
+                        </span>
+</div>
+<h3 class="font-headline-md text-lg text-on-surface mb-1">OpenAI</h3>
+<p class="font-code-block text-code-block text-on-surface-variant mb-4">API Version: 2024-05-13</p>
+<div class="space-y-3 mb-6">
+<div class="flex justify-between text-[11px]">
+<span class="text-outline uppercase">Quota Used</span>
+<span class="text-on-surface font-medium">68%</span>
+</div>
+<div class="w-full bg-surface-container-low h-1 rounded-full overflow-hidden">
+<div class="bg-secondary h-full" style="width: 68%"></div>
+</div>
+<p class="text-[11px] text-outline font-code-block">Latest: GPT-4o-2024-08-06</p>
+</div>
+<button class="w-full py-2 border border-primary/40 text-primary font-label-caps text-label-caps rounded hover:bg-primary/10 transition-all">Configure</button>
+</div>
+<!-- Anthropic Card -->
+<div class="glass-panel p-gutter rounded-xl hover:bg-surface-variant/40 transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-12 h-12 rounded-lg bg-on-tertiary-container flex items-center justify-center border border-tertiary/20">
+<span class="material-symbols-outlined text-tertiary-fixed text-2xl" data-icon="token">token</span>
+</div>
+<span class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-secondary/10 text-secondary font-label-caps text-[10px]">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full animate-pulse"></span>
+                            ONLINE
+                        </span>
+</div>
+<h3 class="font-headline-md text-lg text-on-surface mb-1">Anthropic</h3>
+<p class="font-code-block text-code-block text-on-surface-variant mb-4">Route: direct-auth-v1</p>
+<div class="space-y-3 mb-6">
+<div class="flex justify-between text-[11px]">
+<span class="text-outline uppercase">Quota Used</span>
+<span class="text-on-surface font-medium">12%</span>
+</div>
+<div class="w-full bg-surface-container-low h-1 rounded-full overflow-hidden">
+<div class="bg-secondary h-full" style="width: 12%"></div>
+</div>
+<p class="text-[11px] text-outline font-code-block">Latest: Claude 3.5 Sonnet</p>
+</div>
+<button class="w-full py-2 border border-primary/40 text-primary font-label-caps text-label-caps rounded hover:bg-primary/10 transition-all">Configure</button>
+</div>
+<!-- Google Gemini Card -->
+<div class="glass-panel p-gutter rounded-xl hover:bg-surface-variant/40 transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-12 h-12 rounded-lg bg-primary-container flex items-center justify-center border border-primary/20">
+<span class="material-symbols-outlined text-white text-2xl" data-icon="vortex" style="font-variation-settings: 'FILL' 1;">vertex_cluster</span>
+</div>
+<span class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-error/10 text-error font-label-caps text-[10px]">
+<span class="w-1.5 h-1.5 bg-error rounded-full"></span>
+                            OFFLINE
+                        </span>
+</div>
+<h3 class="font-headline-md text-lg text-on-surface mb-1">Gemini</h3>
+<p class="font-code-block text-code-block text-on-surface-variant mb-4">Vertex AI Integration</p>
+<div class="p-3 bg-error-container/20 border border-error/20 rounded-lg mb-6">
+<p class="text-[10px] text-error font-medium">AUTH_FAILED: Invalid Project ID or Credentials expired.</p>
+</div>
+<button class="w-full py-2 bg-primary/20 text-primary border border-primary/40 font-label-caps text-label-caps rounded hover:bg-primary/30 transition-all">Reconnect</button>
+</div>
+<!-- Local Ollama Card -->
+<div class="glass-panel p-gutter rounded-xl hover:bg-surface-variant/40 transition-all duration-300">
+<div class="flex justify-between items-start mb-6">
+<div class="w-12 h-12 rounded-lg bg-surface-container-highest flex items-center justify-center border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface text-2xl" data-icon="terminal">terminal</span>
+</div>
+<span class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-secondary/10 text-secondary font-label-caps text-[10px]">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full animate-pulse"></span>
+                            LOCAL
+                        </span>
+</div>
+<h3 class="font-headline-md text-lg text-on-surface mb-1">Ollama</h3>
+<p class="font-code-block text-code-block text-on-surface-variant mb-4">127.0.0.1:11434</p>
+<div class="space-y-3 mb-6">
+<div class="flex justify-between text-[11px]">
+<span class="text-outline uppercase">Active Model</span>
+<span class="text-on-surface font-medium">llama3:8b</span>
+</div>
+<div class="flex gap-1">
+<div class="h-1 flex-1 bg-secondary rounded-full"></div>
+<div class="h-1 flex-1 bg-surface-container-low rounded-full"></div>
+<div class="h-1 flex-1 bg-surface-container-low rounded-full"></div>
+</div>
+<p class="text-[11px] text-outline font-code-block">VRAM: 4.2GB / 8GB</p>
+</div>
+<button class="w-full py-2 border border-primary/40 text-primary font-label-caps text-label-caps rounded hover:bg-primary/10 transition-all">Configure</button>
+</div>
+</div>
+<!-- Custom Endpoints Section -->
+<div class="pt-8">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-headline-md text-xl text-on-surface">Custom Endpoints</h3>
+<button class="flex items-center gap-2 text-primary font-label-caps text-label-caps hover:underline">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+                        ADD CUSTOM ENDPOINT
+                    </button>
+</div>
+<div class="glass-panel rounded-xl overflow-hidden">
+<table class="w-full text-left font-body-sm">
+<thead class="bg-surface-container-high border-b border-outline-variant/30">
+<tr>
+<th class="px-gutter py-4 font-label-caps text-label-caps text-outline">ENDPOINT NAME</th>
+<th class="px-gutter py-4 font-label-caps text-label-caps text-outline">URL</th>
+<th class="px-gutter py-4 font-label-caps text-label-caps text-outline">AUTH METHOD</th>
+<th class="px-gutter py-4 font-label-caps text-label-caps text-outline">LATENCY</th>
+<th class="px-gutter py-4 font-label-caps text-label-caps text-outline">ACTIONS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/10">
+<tr class="hover:bg-white/5 transition-colors">
+<td class="px-gutter py-4 font-medium text-on-surface">HuggingFace Gateway</td>
+<td class="px-gutter py-4 font-code-block text-code-block text-on-surface-variant">https://api-inference.huggingface.co/models/...</td>
+<td class="px-gutter py-4"><span class="px-2 py-0.5 rounded bg-surface-variant text-[11px] text-outline">Bearer Token</span></td>
+<td class="px-gutter py-4 text-secondary font-code-block">124ms</td>
+<td class="px-gutter py-4">
+<div class="flex gap-3">
+<button class="material-symbols-outlined text-outline hover:text-primary text-lg" data-icon="edit">edit</button>
+<button class="material-symbols-outlined text-outline hover:text-error text-lg" data-icon="delete">delete</button>
+</div>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors">
+<td class="px-gutter py-4 font-medium text-on-surface">Private Azure Node</td>
+<td class="px-gutter py-4 font-code-block text-code-block text-on-surface-variant">https://codex-private.openai.azure.com/</td>
+<td class="px-gutter py-4"><span class="px-2 py-0.5 rounded bg-surface-variant text-[11px] text-outline">API Key</span></td>
+<td class="px-gutter py-4 text-secondary font-code-block">42ms</td>
+<td class="px-gutter py-4">
+<div class="flex gap-3">
+<button class="material-symbols-outlined text-outline hover:text-primary text-lg" data-icon="edit">edit</button>
+<button class="material-symbols-outlined text-outline hover:text-error text-lg" data-icon="delete">delete</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Atmospheric Illustration (Background subtle) -->
+<div class="mt-12 opacity-40">
+<div class="h-48 rounded-2xl overflow-hidden relative group border border-outline-variant/20">
+<img class="w-full h-full object-cover grayscale brightness-50" data-alt="A sophisticated abstract visual of glowing blue data networks crisscrossing through a dark, minimalist digital space. The scene is illuminated by soft, moody cyan and purple lighting, representing high-speed global connectivity and AI model routing. The overall vibe is futuristic, professional, and quiet, like a high-performance data center at night." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBclqDT98CjWXbV2PLcSEJo6zj4N5upddIUvmuLKjYWWelSTm0EuX4qtI0tcTBzGAaW7Iw2TYd18p5r2X49IcIumT0C1x5CdB9I15-QvL2ueq5zWRtPRJKsUivHskVk6HORHDC4Om_V1218u8CKcc8-J8r4aQCAF5gPRv2xzvFz2ixz3ZtgUY_VUs7f3G5i1fAGeDCDWq40GeRlFJXXMGIMqfUEDG59d5wtm4r0_G1PVJiSir8BmzNRUcirnwF_8tdfEi6_TbT5YdEY">
+<div class="absolute inset-0 bg-gradient-to-t from-background to-transparent"></div>
+<div class="absolute bottom-6 left-6">
+<p class="font-headline-md text-headline-md text-on-surface font-bold">Network Resilience</p>
+<p class="text-on-surface-variant text-body-sm">99.99% Global Uptime Across Proxies</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="fixed bottom-0 right-0 left-[280px] h-8 bg-surface-container-lowest border-t border-outline-variant flex justify-between items-center px-gutter text-[11px] font-code-block text-secondary z-50">
+<div class="flex gap-4">
+<span class="text-outline">Terms</span>
+<span class="text-outline">Privacy</span>
+<span class="flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full"></span>
+                Status: Connected
+            </span>
+</div>
+<span class="text-secondary">© 2024 Novayxk. All rights reserved.</span>
+</footer>
+<!-- FAB (Suppressed as per rules for Details/Settings screens, but included if this counts as Dashboard - we'll keep it as a 'Quick Connect' for proxy) -->
+<!-- Suppressing FAB to follow "Contextual FAB Suppression" for task-focused management screen -->
+<script>
+        // Micro-interactions
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                if (this.textContent.includes('Configure')) {
+                    console.log('Opening configuration panel...');
+                }
+            });
+        });
+
+        // Atmospheric effect: Subtle mouse-follow on the background glass panels
+        document.addEventListener('mousemove', (e) => {
+            const cards = document.querySelectorAll('.glass-panel');
+            const x = e.clientX;
+            const y = e.clientY;
+            
+            cards.forEach(card => {
+                const rect = card.getBoundingClientRect();
+                const localX = x - rect.left;
+                const localY = y - rect.top;
+                
+                if (x > rect.left && x < rect.right && y > rect.top && y < rect.bottom) {
+                    card.style.borderColor = `rgba(59, 130, 246, ${0.1 + (localX / rect.width) * 0.1})`;
+                } else {
+                    card.style.borderColor = `rgba(59, 130, 246, 0.1)`;
+                }
+            });
+        });
+    </script>
+
+
+</body></html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Novayxk Uninstaller</title>
+    <link rel="stylesheet" href="./uninstaller.css" />
+  </head>
+  <body>
+    <main class="uninstaller-shell">
+      <aside class="hero-panel window-drag">
+        <div class="hero-badge">Custom uninstaller</div>
+        <h1>移除 Novayxk</h1>
+        <p>主程序、快捷方式和系统卸载入口会被清理。你可以决定是否同时删除 <code>.novayxk</code> 中的配置与任务历史。</p>
+      </aside>
+
+      <section class="content-panel">
+        <header class="window-bar window-drag">
+          <span id="windowTitle">Novayxk 卸载器</span>
+          <div class="window-actions no-drag">
+            <button id="minimizeButton" type="button" aria-label="最小化">_</button>
+            <button id="closeButton" type="button" aria-label="关闭">×</button>
+          </div>
+        </header>
+
+        <div class="content-body">
+          <div class="kicker">卸载选项</div>
+          <h2>确认要移除的内容</h2>
+          <p class="subcopy">默认只删除程序本体，保留用户目录下的配置与历史数据。</p>
+
+          <div class="card">
+            <span>安装目录</span>
+            <strong id="installDir">-</strong>
+          </div>
+          <div class="card subtle">
+            <span>用户数据</span>
+            <strong id="userDataDir">-</strong>
+          </div>
+
+          <label class="option-row">
+            <input id="deleteUserData" type="checkbox" />
+            <span>
+              <strong>同时删除用户数据</strong>
+              <small>删除 .novayxk 中的模型配置、项目记忆和任务历史</small>
+            </span>
+          </label>
+
+          <div class="progress-panel">
+            <div class="progress-header">
+              <strong id="progressTitle">等待开始</strong>
+              <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <span id="progressFill" class="progress-fill"></span>
+            </div>
+            <p id="progressDetail" class="progress-detail">点击“开始卸载”后会逐步清理进程、快捷方式和系统卸载入口。</p>
+          </div>
+
+          <p id="resultText" class="result-text"></p>
+        </div>
+
+        <footer class="actions">
+          <button id="secondaryButton" class="ghost-button" type="button">取消</button>
+          <button id="openUserDataButton" class="ghost-button" type="button">打开用户数据</button>
+          <button id="primaryButton" class="primary-button" type="button">开始卸载</button>
+        </footer>
+      </section>
+    </main>
+    <script src="./uninstaller-renderer.js"></script>
+  </body>
+  </html>

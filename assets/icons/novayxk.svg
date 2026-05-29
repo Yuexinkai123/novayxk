@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Novayxk icon">
+  <defs>
+    <linearGradient id="field" x1="48" y1="24" x2="214" y2="226" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#123F3C"/>
+      <stop offset="0.52" stop-color="#245F9B"/>
+      <stop offset="1" stop-color="#C95D30"/>
+    </linearGradient>
+    <linearGradient id="nova" x1="74" y1="58" x2="181" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFDF8"/>
+      <stop offset="0.58" stop-color="#BFE7E1"/>
+      <stop offset="1" stop-color="#F6C39B"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#10201F" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="54" fill="#F4F0E8"/>
+  <rect x="24" y="24" width="208" height="208" rx="46" fill="url(#field)" filter="url(#soft-shadow)"/>
+  <path d="M68 176V80h24l72 61V80h24v96h-22l-74-63v63H68Z" fill="url(#nova)"/>
+  <path d="M178 55l8 20 20 8-20 8-8 20-8-20-20-8 20-8 8-20Z" fill="#FFF7D6"/>
+  <path d="M70 196h116" stroke="#FFFDF8" stroke-width="10" stroke-linecap="round" opacity="0.88"/>
+  <path d="M84 198h78" stroke="#6ED4C7" stroke-width="4" stroke-linecap="round" opacity="0.95"/>
+</svg>

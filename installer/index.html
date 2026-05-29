@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Novayxk Installer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="installer-shell">
+      <section class="visual-panel">
+        <div class="window-drag chrome-strip">
+          <div class="traffic-lights" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div id="chromeTitle" class="chrome-title">Novayxk Setup</div>
+        </div>
+
+        <div class="brand-lockup">
+          <div class="brand-mark">
+            <img id="brandLogo" alt="" />
+          </div>
+          <div>
+            <h1>Novayxk</h1>
+            <p>AI coding assistant</p>
+          </div>
+        </div>
+
+        <div class="install-copy">
+          <span id="heroEyebrow" class="eyebrow">Custom installer</span>
+          <h2 id="heroTitle">把你的 AI 编程工作台装进 Windows。</h2>
+          <p id="heroBody">配置、项目记忆和任务历史会保存在用户目录，卸载主程序时默认不会误删你的工作数据。</p>
+        </div>
+
+        <div class="metric-grid">
+          <div>
+            <strong id="metricOneTitle">本地安装</strong>
+            <span id="metricOneBody">无需老式向导</span>
+          </div>
+          <div>
+            <strong id="metricTwoTitle">开始菜单</strong>
+            <span id="metricTwoBody">可选快捷方式</span>
+          </div>
+          <div>
+            <strong id="metricThreeTitle">卸载入口</strong>
+            <span id="metricThreeBody">接入系统设置</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-panel">
+        <div class="titlebar window-drag">
+          <span id="versionLabel">v0.0.0</span>
+          <div class="window-controls">
+            <button id="minimizeButton" class="icon-button no-drag" type="button" aria-label="最小化">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+            <button id="closeButton" class="icon-button no-drag" type="button" aria-label="关闭">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div id="stepIndicator" class="step-indicator" aria-label="安装步骤">
+          <span class="step-dot active" data-step-dot="0"></span>
+          <span class="step-dot" data-step-dot="1"></span>
+          <span class="step-dot" data-step-dot="2"></span>
+        </div>
+
+        <form id="installForm" class="install-form">
+          <div class="step active" data-step="0">
+            <span id="optionsKicker" class="panel-kicker">安装选项</span>
+            <h3 id="optionsTitle">选择一个干净利落的安装方式。</h3>
+            <p id="optionsBody" class="subcopy">默认安装到当前用户目录，不需要管理员权限。你也可以换到其它专用目录。</p>
+
+            <label id="pathLabel" class="field-label" for="installDir">安装位置</label>
+            <div class="path-picker">
+              <input id="installDir" type="text" spellcheck="false" />
+              <button id="browseButton" type="button">浏览</button>
+            </div>
+
+            <div class="option-list">
+              <label id="desktopOptionRow" class="option-row">
+                <input id="desktopShortcut" type="checkbox" checked />
+                <span>
+                  <strong>创建桌面快捷方式</strong>
+                  <small>安装完成后可从桌面启动 Novayxk</small>
+                </span>
+              </label>
+              <label id="startMenuOptionRow" class="option-row">
+                <input id="startMenuShortcut" type="checkbox" checked />
+                <span>
+                  <strong>添加到开始菜单</strong>
+                  <small>在 Windows 开始菜单中显示 Novayxk</small>
+                </span>
+              </label>
+              <label id="launchOptionRow" class="option-row">
+                <input id="launchAfterInstall" type="checkbox" checked />
+                <span>
+                  <strong>安装后立即启动</strong>
+                  <small>完成后直接打开应用</small>
+                </span>
+              </label>
+              <label id="deleteDataOptionRow" class="option-row hidden">
+                <input id="deleteUserData" type="checkbox" />
+                <span>
+                  <strong>同时删除用户数据</strong>
+                  <small>删除 .novayxk 中的配置、项目记忆和任务历史</small>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="step" data-step="1">
+            <span id="progressKicker" class="panel-kicker">正在安装</span>
+            <h3 id="progressTitle">准备安装</h3>
+            <p id="progressDetail" class="subcopy">正在检查安装目录和应用资源。</p>
+
+            <div class="progress-card">
+              <div class="progress-ring">
+                <svg viewBox="0 0 120 120" aria-hidden="true">
+                  <circle cx="60" cy="60" r="52" class="track"></circle>
+                  <circle id="progressCircle" cx="60" cy="60" r="52" class="value"></circle>
+                </svg>
+                <strong id="progressPercent">0%</strong>
+              </div>
+              <div class="progress-log">
+                <span>写入位置</span>
+                <strong id="progressPath">等待开始</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="step" data-step="2">
+            <span id="resultKicker" class="panel-kicker">安装完成</span>
+            <h3 id="resultTitle">Novayxk 已准备好。</h3>
+            <p id="resultBody" class="subcopy">主程序、快捷方式和卸载入口已经写入。你的模型配置和项目记忆会保存在用户目录。</p>
+
+            <div class="result-card">
+              <div>
+                <span id="installedDirLabel">安装目录</span>
+                <strong id="installedDir">-</strong>
+              </div>
+              <button id="openInstallDirButton" type="button">打开目录</button>
+            </div>
+            <div class="result-card subtle">
+              <div>
+                <span id="userDataLabel">用户配置</span>
+                <strong id="userDataDir">-</strong>
+              </div>
+              <button id="openUserDataDirButton" type="button">打开目录</button>
+            </div>
+          </div>
+
+          <p id="errorText" class="error-text" role="alert"></p>
+
+          <div class="actions">
+            <button id="secondaryButton" class="ghost-button" type="button">退出</button>
+            <button id="primaryButton" class="primary-button" type="submit">开始安装</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
