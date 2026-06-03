@@ -17,6 +17,10 @@ function hasMeaningfulCommandOutput(output: string) {
 export function buildCommandResultJudgementNote(results: CommandResultEvidence[]) {
   const notes: string[] = [];
 
+  if (results.some((result) => result.code === null)) {
+    notes.push("有些命令还在终端任务里继续运行，当前并没有执行完成。不能把这种结果说成“已经成功”或“已经失败”；应明确告诉用户任务仍在进行中，只能先根据当前输出给阶段性判断。");
+  }
+
   if (results.some((result) => result.code === 0 && isInspectionLikeCommand(result.command) && !hasMeaningfulCommandOutput(result.output))) {
     notes.push("有些查询命令虽然退出码为 0，但输出是空的。这只能说明这一次检查没有返回可见结果，不能直接下“没有安装”“不存在”“没有配置”的结论；应该改说“这次检查未查到”，并建议再换一个来源复核。");
   }

@@ -5,6 +5,7 @@ import {
   detectInternalControlModeRequest,
   extractFileOps,
   getFileOpsParseIssue,
+  hasDestructiveFileOps,
   normalizeAssistantToolCallContent,
   sanitizeChatHistory,
   stripInjectedContext,
@@ -52,13 +53,16 @@ describe("AI chat parsing guards", () => {
   });
 
   it("extracts valid fileops and reports malformed blocks", () => {
-    expect(
-      extractFileOps('```fileops\n[{"type":"mkdir","path":"docs"},{"type":"write","path":"docs/a.md","content":"hi"}]\n```'),
-    ).toEqual([
+    const operations = extractFileOps(
+      '```fileops\n[{"type":"mkdir","path":"docs"},{"type":"write","path":"docs/a.md","content":"hi"},{"type":"delete","path":"dist"}]\n```',
+    );
+
+    expect(operations).toEqual([
       { type: "mkdir", path: "docs" },
       { type: "write", path: "docs/a.md", content: "hi" },
+      { type: "delete", path: "dist" },
     ]);
-
+    expect(hasDestructiveFileOps(operations)).toBe(true);
     expect(getFileOpsParseIssue('```fileops\n[{"type":"write","path":"a.md"}]\n```')).toContain("JSON 不是合法");
   });
 
@@ -99,6 +103,11 @@ describe("AI chat parsing guards", () => {
   it("warns against over-trusting empty or garbled command output", () => {
     const note = buildCommandResultJudgementNote([
       {
+        command: "npm run dev",
+        output: "ready - started server on http://127.0.0.1:5173",
+        code: null,
+      },
+      {
         command: "Get-ItemProperty HKLM:\\... | Where-Object { $_.DisplayName -like \"*UU*\" }",
         output: "",
         code: 0,
@@ -112,6 +121,7 @@ describe("AI chat parsing guards", () => {
 
     expect(note).toContain("不能直接下");
     expect(note).toContain("编码乱码");
+    expect(note).toContain("还在终端任务里继续运行");
   });
 
   it("detects action replies that stop at a half sentence", () => {

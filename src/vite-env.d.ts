@@ -163,7 +163,7 @@ declare global {
         };
       }>;
       runCommand: (command: string) => Promise<{
-        code: number;
+        code: number | null;
         output: string;
         terminalTask?: TerminalTask;
         longRunning?: boolean;
@@ -174,7 +174,7 @@ declare global {
         confirmedSystemAction?: boolean;
         commandScope?: "project" | "system";
       }) => Promise<{
-        code: number;
+        code: number | null;
         output: string;
         command: string;
         commandScope: "project" | "system";

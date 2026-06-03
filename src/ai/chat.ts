@@ -297,6 +297,10 @@ export function extractFileOps(content: string): FileOperation[] {
   });
 }
 
+export function hasDestructiveFileOps(operations: FileOperation[]) {
+  return operations.some((operation) => operation.type === "delete");
+}
+
 export function getFileOpsParseIssue(content: string) {
   const hasOpenFileOpsFence = /```fileops\n/i.test(content);
   const hasOpenJsonFileOpsFence = /```json\n[\s\S]*(?:"type"\s*:|"path"\s*:)/i.test(content);

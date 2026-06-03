@@ -90,9 +90,14 @@ function ConfirmDialogBody({ dialog }: { dialog: ConfirmDialogState }) {
   }
 
   if (dialog.type === "fileops") {
+    const hasDeleteOperation = dialog.operations.some((operation) => operation.type === "delete");
     return (
       <>
-        <p className="confirm-copy">Novayxk 将在当前项目内执行以下文件操作。请确认路径和覆盖行为符合预期。</p>
+        <p className="confirm-copy">
+          {hasDeleteOperation
+            ? "Novayxk 将在当前项目内执行以下文件操作，其中包含删除路径。请特别确认删除目标、覆盖行为和影响范围。"
+            : "Novayxk 将在当前项目内执行以下文件操作。请确认路径和覆盖行为符合预期。"}
+        </p>
         <ul className="file-confirm-list">
           {dialog.operations.map((operation, index) => (
             <li key={`${operation.type}-${operation.path}-${index}`}>

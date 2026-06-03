@@ -55,14 +55,16 @@ export function normalizeCommandForLoop(command: string) {
     .toLowerCase();
 }
 
-export function extractPowerShellCommandRequests(content: string): PowerShellCommandRequest[] {
+export function extractPowerShellCommandRequests(content: string, options: { includeInline?: boolean } = {}) {
   const requests: PowerShellCommandRequest[] = [];
   const seen = new Set<string>();
   for (const command of extractPowerShellCommands(content)) {
     addPowerShellCommandRequest(requests, seen, command, "block");
   }
-  for (const command of extractInlinePowerShellCommands(content)) {
-    addPowerShellCommandRequest(requests, seen, command, "inline");
+  if (options.includeInline === true) {
+    for (const command of extractInlinePowerShellCommands(content)) {
+      addPowerShellCommandRequest(requests, seen, command, "inline");
+    }
   }
   return requests;
 }

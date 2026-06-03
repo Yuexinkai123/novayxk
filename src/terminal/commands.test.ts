@@ -23,10 +23,24 @@ describe("terminal command guards", () => {
     ]);
   });
 
+  it("does not auto-extract inline commands by default", () => {
+    const content = "npm run build";
+
+    expect(extractPowerShellCommandRequests(content)).toEqual([]);
+  });
+
   it("ignores explanatory Chinese text when looking for inline commands", () => {
     const content = "你可以运行 npm run build 看看，但这句话不应该被当作命令。";
 
-    expect(extractPowerShellCommandRequests(content)).toEqual([]);
+    expect(extractPowerShellCommandRequests(content, { includeInline: true })).toEqual([]);
+  });
+
+  it("can still opt in to inline command extraction for compatibility checks", () => {
+    const content = "npm run build";
+
+    expect(extractPowerShellCommandRequests(content, { includeInline: true })).toEqual([
+      { command: "npm run build", source: "inline" },
+    ]);
   });
 
   it("normalizes repeated commands for loop detection", () => {

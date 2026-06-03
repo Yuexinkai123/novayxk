@@ -8,6 +8,7 @@ import {
   extractFileOps,
   formatProjectContext,
   getFileOpsParseIssue,
+  hasDestructiveFileOps,
   getProjectContextMode,
   normalizeAssistantToolCallContent,
   sanitizeChatHistory,
@@ -245,6 +246,25 @@ export function useAiAssistant({
       ];
       setMessages(nextMessages);
       setStatus("fileops 不完整，可能被模型输出长度截断");
+      return nextMessages;
+    }
+
+    if (hasDestructiveFileOps(operations)) {
+      const warning =
+        "检测到 delete 文件操作。为了避免 AI 自动误删项目内容，这类 fileops 不会自动执行；请先检查路径，再点底部工具栏的“执行文件操作”按钮手动确认。";
+      const lastMessage = baseMessages[baseMessages.length - 1];
+      const nextMessages: ChatMessage[] =
+        lastMessage?.role === "assistant"
+          ? [
+              ...baseMessages.slice(0, -1),
+              {
+                ...lastMessage,
+                content: `${lastMessage.content.trim()}\n\n${warning}`,
+              },
+            ]
+          : [...baseMessages, { role: "assistant", content: warning }];
+      setMessages(nextMessages);
+      setStatus("检测到删除类 fileops，已改为等待人工确认");
       return nextMessages;
     }
 

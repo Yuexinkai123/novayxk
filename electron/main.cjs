@@ -541,10 +541,10 @@ function runCommandAsTerminalTask(command, options = {}) {
     const serializedTask = serializeTerminalTask(finishedTask);
     const stillRunning = serializedTask.status === "running";
     const output = stillRunning
-      ? `${serializedTask.output.slice(-18000)}\n\n命令仍在终端任务中运行，后续输出会继续显示在底部“终端任务”面板。`.trim()
+      ? `${serializedTask.output.slice(-18000)}\n\n命令仍在终端任务中运行，尚未执行完成；后续输出会继续显示在底部“终端任务”面板。`.trim()
       : serializedTask.output.slice(-20000);
     return {
-      code: stillRunning ? 0 : serializedTask.code ?? 1,
+      code: stillRunning ? null : serializedTask.code ?? 1,
       output,
       task: serializedTask,
       longRunning: stillRunning,
