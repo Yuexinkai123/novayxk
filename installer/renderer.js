@@ -163,7 +163,7 @@ function applyModeCopy() {
   elements.heroEyebrow.textContent = isUninstall ? "Custom uninstaller" : "Custom installer";
   elements.heroTitle.textContent = isUninstall
     ? "干净地移除 Novayxk。"
-    : "把你的 AI 编程工作台装进 Windows。";
+    : "把你的本地 AI 项目工作台装进 Windows。";
   elements.heroBody.textContent = isUninstall
     ? "主程序、快捷方式和系统卸载入口会被移除。你也可以决定是否连同 .novayxk 里的配置与任务历史一起删除。"
     : "配置、项目记忆和任务历史会保存在用户目录，卸载主程序时默认不会误删你的工作数据。";
@@ -224,7 +224,7 @@ async function startInstall() {
     elements.userDataDir.textContent = result.userDataDir;
     setStep(2);
   } catch (error) {
-    showError(error?.message || "安装失败。");
+    showError(normalizeInstallerError(error?.message || "安装失败。"));
     setStep(0);
   } finally {
     state.installing = false;
@@ -273,7 +273,7 @@ async function startUninstall() {
       : "主程序已经移除。关闭这个窗口后会继续删除安装目录，.novayxk 数据会保留下来。";
     setStep(2);
   } catch (error) {
-    showError(error?.message || "卸载失败。");
+    showError(normalizeInstallerError(error?.message || "卸载失败。"));
     setStep(0);
   } finally {
     state.installing = false;
@@ -349,4 +349,37 @@ function clearError() {
 
 function showError(message) {
   elements.errorText.textContent = message;
+}
+
+function normalizeInstallerError(message) {
+  const cleaned = String(message || "")
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+
+  if (!cleaned) return "操作失败。";
+
+  if (/安装目录正在被占用|INSTALL_DIR_BUSY|EBUSY|EPERM|EACCES/i.test(cleaned)) {
+    return [
+      "安装失败：旧版本目录仍被占用。",
+      "请先关闭 Novayxk、卸载器，以及打开安装目录的资源管理器或终端窗口，然后重新点击“开始安装”。",
+      "如果仍然失败，重启电脑后第一时间再次运行安装器。",
+    ].join("\n");
+  }
+
+  if (/专用文件夹|已有其他文件|目录不能为空/i.test(cleaned)) {
+    return [
+      "安装失败：当前目录不适合直接安装。",
+      "请改用一个空目录，或者选择名为 Novayxk 的专用文件夹，避免覆盖其它文件。",
+    ].join("\n");
+  }
+
+  if (/安装资源不存在|资源包不存在|没有找到/i.test(cleaned)) {
+    return [
+      "安装失败：安装资源不完整。",
+      "请重新生成安装包，或重新下载完整的自定义安装器后再试一次。",
+    ].join("\n");
+  }
+
+  return cleaned;
 }

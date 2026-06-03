@@ -243,6 +243,7 @@ label {
   color: #b04b4b;
   line-height: 1.6;
   font-size: 13px;
+  white-space: pre-line;
 }
 
 .actions {

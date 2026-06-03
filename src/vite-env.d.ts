@@ -13,12 +13,26 @@ export type ThemeMode = "dark" | "light";
 
 export type AiControlMode = "safe" | "full";
 
+export type PendingAdminResume = {
+  action: "run-command";
+  source: "manual" | "ai";
+  command: string;
+  controlMode: AiControlMode;
+  taskId?: string | null;
+  projectRoot?: string | null;
+  createdAt: string;
+  messages?: ChatMessage[];
+};
+
 export type AppConfig = {
   providers: ProviderConfig[];
   activeProviderId: string | null;
   lastProjectRoot?: string | null;
   theme?: ThemeMode;
   aiControlMode?: AiControlMode;
+  hasSeenWelcome?: boolean;
+  hasSeenWorkspaceGuide?: boolean;
+  pendingAdminResume?: PendingAdminResume | null;
 };
 
 export type ChatMessage = {
@@ -101,6 +115,7 @@ export type TerminalTask = {
   id: string;
   title: string;
   command: string;
+  commandScope: "project" | "system";
   cwd: string;
   status: "running" | "exited" | "failed" | "stopped";
   code: number | null;
@@ -141,6 +156,7 @@ declare global {
         requiresAdmin?: boolean;
         adminReason?: string;
         requiresConfirmation?: boolean;
+        commandScope?: "project" | "system";
         systemAction?: {
           action: string;
           label: string;
@@ -156,10 +172,12 @@ declare global {
         command: string;
         controlMode: "safe" | "full";
         confirmedSystemAction?: boolean;
+        commandScope?: "project" | "system";
       }) => Promise<{
         code: number;
         output: string;
         command: string;
+        commandScope: "project" | "system";
         controlMode: "safe" | "full";
         bypassedDangerCheck: boolean;
         terminalTask?: TerminalTask;
@@ -170,6 +188,7 @@ declare global {
         title?: string;
         controlMode: "safe" | "full";
         confirmedSystemAction?: boolean;
+        commandScope?: "project" | "system";
       }) => Promise<TerminalTask>;
       stopTerminalTask: (taskId: string) => Promise<TerminalTask>;
       writeTerminalInput: (taskId: string, input: string) => Promise<TerminalTask>;
@@ -200,6 +219,7 @@ declare global {
         appLog: string;
         errorLog: string;
         aiLog: string;
+        behaviorLog: string;
         uninstallCleanupLog: string;
         launchDebugLog: string;
       }>;
@@ -207,12 +227,14 @@ declare global {
         appLog: string;
         errorLog: string;
         aiLog: string;
+        behaviorLog: string;
       }>;
       openLogs: () => Promise<{
         logDir: string;
         appLog: string;
         errorLog: string;
         aiLog: string;
+        behaviorLog: string;
         uninstallCleanupLog: string;
         launchDebugLog: string;
       }>;

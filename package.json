@@ -1,14 +1,17 @@
 {
   "name": "novayxk",
-  "version": "0.4.6",
+  "version": "0.6.2",
   "private": true,
-  "description": "Novayxk - a universal AI coding assistant desktop app.",
+  "description": "Novayxk - a Windows local AI project workspace desktop app.",
   "main": "electron/main.cjs",
   "author": "Novayxk",
   "scripts": {
     "dev": "npm run setup:desktop && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && npm run desktop\"",
     "web": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "test": "vitest run",
+    "check:electron": "node scripts/check-electron-services.cjs",
+    "smoke": "npm run build && npm run test && npm run check:electron",
     "preview": "vite preview --host 127.0.0.1",
     "desktop": "node scripts/run-electron.cjs .",
     "setup:desktop": "node scripts/setup-electron.cjs",
@@ -22,11 +25,13 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
-    "vite": "^7.0.0",
-    "typescript": "^5.8.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -35,6 +40,7 @@
     "concurrently": "^9.0.0",
     "electron": "33.4.11",
     "electron-builder": "^26.0.12",
+    "vitest": "^4.1.7",
     "wait-on": "^8.0.0"
   },
   "build": {

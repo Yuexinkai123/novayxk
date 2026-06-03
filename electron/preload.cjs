@@ -2,11 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 function readInitialConfig() {
   try {
-    const fs = require("node:fs");
-    const os = require("node:os");
-    const path = require("node:path");
-    const configPath = path.join(os.homedir(), ".novayxk", "config", "providers.json");
-    return JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return ipcRenderer.sendSync("config:getInitialSync");
   } catch {
     return {};
   }
@@ -14,8 +10,21 @@ function readInitialConfig() {
 
 const initialConfig = readInitialConfig();
 
-if (initialConfig.theme === "light" || initialConfig.theme === "dark") {
-  document.documentElement.dataset.theme = initialConfig.theme;
+function applyInitialTheme(theme) {
+  if (theme !== "light" && theme !== "dark") return;
+
+  const applyTheme = () => {
+    if (document.documentElement) {
+      document.documentElement.dataset.theme = theme;
+    }
+  };
+
+  if (document.documentElement) {
+    applyTheme();
+    return;
+  }
+
+  window.addEventListener("DOMContentLoaded", applyTheme, { once: true });
 }
 
 function createRequestId() {
@@ -100,3 +109,9 @@ contextBridge.exposeInMainWorld("novayxk", {
   getPrivilege: () => ipcRenderer.invoke("app:getPrivilege"),
   restartAsAdmin: () => ipcRenderer.invoke("app:restartAsAdmin"),
 });
+
+try {
+  applyInitialTheme(initialConfig.theme);
+} catch {
+  // Keep the desktop bridge available even if early DOM access fails.
+}

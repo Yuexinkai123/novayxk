@@ -201,6 +201,9 @@ ipcMain.handle("installer:install", async (event, options) => {
       emitProgress(event, Math.min(percent, 72), "复制 Novayxk", path.relative(payloadDir, filePath));
     });
 
+    emitProgress(event, 73, "关闭旧版本进程", "正在释放可能被占用的程序文件");
+    await closeRunningAppProcesses();
+
     emitProgress(event, 74, "切换安装目录", "正在替换旧版本文件");
     await replaceInstallDirectory(stagingDir, normalized.installDir);
 
@@ -231,6 +234,8 @@ ipcMain.handle("installer:install", async (event, options) => {
       exePath: targetExe,
       userDataDir: APP_USER_DATA_DIR,
     };
+  } catch (error) {
+    throw new Error(formatInstallerError(error, options?.installDir));
   } finally {
     installInProgress = false;
   }
@@ -384,7 +389,12 @@ async function replaceInstallDirectory(stagingDir, installDir) {
 
   if (hadExistingInstall) {
     await removePath(backupDir);
-    await diskFs.rename(installDir, backupDir);
+    try {
+      await diskFs.rename(installDir, backupDir);
+    } catch (error) {
+      await removePath(stagingDir);
+      throw createInstallDirectoryBusyError(error, installDir);
+    }
   }
 
   try {
@@ -395,8 +405,33 @@ async function replaceInstallDirectory(stagingDir, installDir) {
       await diskFs.rename(backupDir, installDir).catch(() => {});
     }
     await removePath(stagingDir);
-    throw error;
+    throw createInstallDirectoryBusyError(error, installDir);
   }
+}
+
+function createInstallDirectoryBusyError(error, installDir) {
+  if (!isBusyPathError(error)) return error;
+  const friendly = new Error(
+    [
+      "安装目录正在被占用，暂时无法替换旧版本。",
+      "",
+      `请先关闭正在运行的 Novayxk、卸载器，以及打开 ${installDir} 的资源管理器或终端窗口，然后重新点击“开始安装”。`,
+      "如果仍然失败，请重启电脑后第一时间运行安装器。",
+    ].join("\n"),
+  );
+  friendly.code = "INSTALL_DIR_BUSY";
+  friendly.cause = error;
+  return friendly;
+}
+
+function isBusyPathError(error) {
+  return error?.code === "EBUSY" || error?.code === "EPERM" || error?.code === "EACCES";
+}
+
+function formatInstallerError(error, installDir) {
+  if (error?.code === "INSTALL_DIR_BUSY") return error.message;
+  if (isBusyPathError(error)) return createInstallDirectoryBusyError(error, installDir || getDefaultInstallDir()).message;
+  return error instanceof Error ? error.message : "安装失败。";
 }
 
 async function assertInstallDirSafe(installDir) {
@@ -650,7 +685,10 @@ async function directorySize(dir) {
 
 async function closeRunningAppProcesses() {
   await runPowerShell(`
-Get-Process -Name "Novayxk" -ErrorAction SilentlyContinue | Stop-Process -Force
+$names = @("Novayxk", "Novayxk Uninstaller", "Novayxk Cleanup")
+foreach ($name in $names) {
+  Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force
+}
 `).catch(() => {});
 }
 

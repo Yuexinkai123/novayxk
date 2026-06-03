@@ -82,8 +82,9 @@ async function startUninstall() {
       : "卸载准备完成。关闭窗口后会继续删除程序目录，.novayxk 数据会保留下来。";
   } catch (error) {
     state.progressTitle = "卸载失败";
-    state.progressDetail = error?.message || "卸载失败。";
-    elements.resultText.textContent = error?.message || "卸载失败。";
+    const message = normalizeUninstallError(error?.message || "卸载失败。");
+    state.progressDetail = message;
+    elements.resultText.textContent = message;
   } finally {
     state.running = false;
     render();
@@ -130,4 +131,29 @@ function renderProgress() {
   elements.progressPercent.textContent = `${Math.round(state.progressPercent)}%`;
   elements.progressFill.style.width = `${state.progressPercent}%`;
   elements.progressDetail.textContent = state.progressDetail;
+}
+
+function normalizeUninstallError(message) {
+  const cleaned = String(message || "")
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+
+  if (!cleaned) return "卸载失败。";
+
+  if (/没有在这里找到|找不到 Novayxk 主程序或卸载器/i.test(cleaned)) {
+    return [
+      "卸载失败：当前目录里没有识别到 Novayxk 主程序。",
+      "请确认你选择的是 Novayxk 的实际安装目录，或者从“应用和功能”里重新发起卸载。",
+    ].join("\n");
+  }
+
+  if (/EBUSY|EPERM|EACCES|占用|拒绝访问/i.test(cleaned)) {
+    return [
+      "卸载失败：仍有文件正在被占用。",
+      "请先关闭 Novayxk、资源管理器中的安装目录窗口，以及相关终端后再重试。",
+    ].join("\n");
+  }
+
+  return cleaned;
 }
