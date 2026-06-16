@@ -114,12 +114,17 @@ ipcMain.handle("window:close", async () => {
 });
 
 ipcMain.handle("installer:getDefaults", async () => {
-  const requestedDefaultDir = uninstallTargetArg || process.env.NOVAYXK_INSTALL_DIR || getDefaultInstallDir();
+  const previousInstallDir =
+    isUninstallMode
+      ? ""
+      : await readInstalledLocationFromRegistry().catch(() => "");
+  const requestedDefaultDir = uninstallTargetArg || previousInstallDir || process.env.NOVAYXK_INSTALL_DIR || getDefaultInstallDir();
   const defaultInstallDir = isUninstallMode ? path.resolve(requestedDefaultDir) : normalizeInstallDir(requestedDefaultDir);
   writeDebugLog("installer:getDefaults", {
     source: "installer-main",
     uninstallDir: defaultInstallDir,
     mode: isUninstallMode ? "uninstall" : "install",
+    previousInstallDir,
   });
   return {
     mode: isUninstallMode ? "uninstall" : "install",
@@ -297,6 +302,17 @@ ipcMain.handle("installer:uninstall", async (event, options) => {
 function getDefaultInstallDir() {
   const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
   return path.join(localAppData, "Programs", "Novayxk");
+}
+
+async function readInstalledLocationFromRegistry() {
+  const output = await runCommand("reg.exe", ["query", APP_REGISTRY_KEY, "/v", "InstallLocation"]);
+  const match = output.match(/^\s*InstallLocation\s+REG_\w+\s+(.+?)\s*$/im);
+  if (!match) return "";
+
+  const installLocation = String(match[1] || "").trim();
+  if (!installLocation) return "";
+
+  return await pathExists(installLocation) ? installLocation : "";
 }
 
 async function getPayloadDir(event) {

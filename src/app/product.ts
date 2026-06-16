@@ -1,4 +1,4 @@
-import type { AiControlMode } from "../vite-env";
+import type { AiControlMode, AssistantMode } from "../vite-env";
 
 export const PRODUCT_NAME = "Novayxk";
 export const PRODUCT_TAGLINE = "Windows 本地 AI 项目工作台";
@@ -19,6 +19,22 @@ export function getExecutionModeStatus(mode: AiControlMode) {
 
 export function getExecutionModeHint(mode: AiControlMode) {
   return mode === "full" ? "系统级执行已开启" : "项目内执行已开启";
+}
+
+export function getAssistantModeLabel(mode: AssistantMode) {
+  if (mode === "low") return "极省";
+  if (mode === "deep") return "深度";
+  return "标准";
+}
+
+export function getAssistantModeTitle(mode: AssistantMode) {
+  if (mode === "low") return "低 token 消耗：减少上下文和长解释，默认只做最低成本复查";
+  if (mode === "deep") return "深度协作：保留更多上下文，并在执行后做完整复查链路";
+  return "标准协作：在速度和完整度之间保持平衡，并补关键结果复查";
+}
+
+export function getAssistantModeStatus(mode: AssistantMode) {
+  return `已切换到${getAssistantModeLabel(mode)}模式`;
 }
 
 export function getPrivilegeChipLabel(isAdmin: boolean | null | undefined) {

@@ -1,17 +1,13 @@
 import React from "react";
 import { ChevronsUp, Code2, Save, Search, ShieldCheck, TriangleAlert } from "lucide-react";
 import type { AiControlMode } from "../../vite-env";
+import type { ProjectSelectedFile } from "../../vite-env";
 import { getExecutionModeHint } from "../../app/product";
 import type { WorkspaceGuideKind } from "../../app/workspaceGuide";
 import { WorkspaceGuide } from "../onboarding/WorkspaceGuide";
 
-type SelectedFile = {
-  path: string;
-  content: string;
-};
-
 type EditorPaneProps = {
-  selectedFile: SelectedFile | null;
+  selectedFile: ProjectSelectedFile | null;
   isEditorDirty: boolean;
   stats: {
     lines: number;
@@ -54,15 +50,23 @@ export function EditorPane({
   onSelectedFileContentChange,
   onEditorKeyDown,
 }: EditorPaneProps) {
+  const isTextFile = selectedFile?.kind === "text";
+  const isImageFile = selectedFile?.kind === "image";
+  const imageSizeLabel = isImageFile
+    ? selectedFile.size >= 1024 * 1024
+      ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(selectedFile.size / 1024))} KB`
+    : "";
+
   return (
     <>
       <div className="editor-header">
         <div>
-          <span>代码上下文</span>
+          {/* <span>代码上下文</span> */}
           <strong>{selectedFile ? `${selectedFile.path}${isEditorDirty ? " *" : ""}` : "尚未选择文件"}</strong>
         </div>
         <div className="editor-header-actions">
-          {selectedFile && (
+          {isTextFile && (
             <div className="editor-find">
               <Search size={13} />
               <input
@@ -77,7 +81,7 @@ export function EditorPane({
           <button
             className={`editor-tool-button ${isWordWrapEnabled ? "active" : ""}`}
             onClick={onToggleWordWrap}
-            disabled={!selectedFile}
+            disabled={!isTextFile}
             title="切换自动换行"
           >
             换行
@@ -87,7 +91,7 @@ export function EditorPane({
               <ChevronsUp size={15} />
             </button>
           )}
-          <button className="editor-save-button" onClick={onSaveSelectedFile} disabled={!selectedFile || !isEditorDirty} title="保存当前文件 Ctrl+S">
+          <button className="editor-save-button" onClick={onSaveSelectedFile} disabled={!isTextFile || !isEditorDirty} title="保存当前文件 Ctrl+S">
             <Save size={15} />
             保存
           </button>
@@ -100,22 +104,33 @@ export function EditorPane({
 
       <div className="code-view">
         {selectedFile ? (
-          <div className="code-editor-shell">
-            <pre className="line-numbers" aria-hidden="true">
-              {Array.from({ length: stats.lines }, (_, index) => index + 1).join("\n")}
-            </pre>
-            <textarea
-              className={`code-editor ${isWordWrapEnabled ? "wrap" : ""}`}
-              value={selectedFile.content}
-              spellCheck={false}
-              onChange={(event) => onSelectedFileContentChange(event.target.value)}
-              onKeyDown={onEditorKeyDown}
-            />
-            <div className="editor-stats">
-              {stats.lines} 行 · {stats.characters} 字符
-              {editorFind ? ` · 匹配 ${editorFindMatches}` : ""}
+          isTextFile ? (
+            <div className="code-editor-shell">
+              <pre className="line-numbers" aria-hidden="true">
+                {Array.from({ length: stats.lines }, (_, index) => index + 1).join("\n")}
+              </pre>
+              <textarea
+                className={`code-editor ${isWordWrapEnabled ? "wrap" : ""}`}
+                value={selectedFile.content}
+                spellCheck={false}
+                onChange={(event) => onSelectedFileContentChange(event.target.value)}
+                onKeyDown={onEditorKeyDown}
+              />
+              <div className="editor-stats">
+                {stats.lines} 行 · {stats.characters} 字符
+                {editorFind ? ` · 匹配 ${editorFindMatches}` : ""}
+              </div>
             </div>
-          </div>
+          ) : isImageFile ? (
+            <div className="editor-image-shell">
+              <div className="editor-image-stage">
+                <img className="editor-image-preview" src={selectedFile.url} alt={selectedFile.path} />
+              </div>
+              <div className="editor-image-meta">
+                {selectedFile.mimeType} · {imageSizeLabel}
+              </div>
+            </div>
+          ) : null
         ) : (
           <div className="empty-state-shell">
             {workspaceGuideKind ? (

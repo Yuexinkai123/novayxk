@@ -47,7 +47,6 @@ export function useTerminalTasks({
   onTaskNeedsInput,
 }: UseTerminalTasksOptions) {
   const [terminalCommand, setTerminalCommand] = React.useState("npm run dev");
-  const [terminalInput, setTerminalInput] = React.useState("");
   const [terminalTasks, setTerminalTasks] = React.useState<TerminalTask[]>([]);
   const [activeTerminalTaskId, setActiveTerminalTaskId] = React.useState<string | null>(null);
   const activeTerminalTask = terminalTasks.find((task) => task.id === activeTerminalTaskId) ?? terminalTasks[0] ?? null;
@@ -176,24 +175,9 @@ export function useTerminalTasks({
     }
   }, [activeTerminalTask, setStatus]);
 
-  const sendTerminalInput = React.useCallback(async () => {
-    const input = terminalInput.trim();
-    if (!input || !activeTerminalTask || activeTerminalTask.status !== "running" || !window.novayxk) return;
-    try {
-      const task = await window.novayxk.writeTerminalInput(activeTerminalTask.id, input);
-      upsertTerminalTask(task);
-      setTerminalInput("");
-      setStatus(`已向终端任务发送输入：${task.title}`);
-    } catch (error) {
-      setStatus(formatActionableError(error, "发送终端输入失败"));
-    }
-  }, [activeTerminalTask, setStatus, terminalInput, upsertTerminalTask]);
-
   return {
     terminalCommand,
     setTerminalCommand,
-    terminalInput,
-    setTerminalInput,
     terminalTasks,
     activeTerminalTask,
     runningTerminalTaskCount,
@@ -203,6 +187,5 @@ export function useTerminalTasks({
     stopActiveTerminalTask,
     restartActiveTerminalTask,
     copyTerminalOutput,
-    sendTerminalInput,
   };
 }

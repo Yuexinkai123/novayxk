@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasAnyConfiguredProvider, hasUsableProvider } from "./providers";
+import { getProviderModeLabel, hasAnyConfiguredProvider, hasUsableProvider, inferProviderApiMode, isAssistantMode, isLikelyImageModel } from "./providers";
 
 describe("provider readiness helpers", () => {
   it("requires base url, model, and api key to treat a provider as usable", () => {
@@ -39,5 +39,21 @@ describe("provider readiness helpers", () => {
         },
       ]),
     ).toBe(false);
+  });
+
+  it("recognizes common image generation model names", () => {
+    expect(isLikelyImageModel("gpt-image-1")).toBe(true);
+    expect(isLikelyImageModel("dall-e-3")).toBe(true);
+    expect(isLikelyImageModel("gpt-4.1-mini")).toBe(false);
+    expect(inferProviderApiMode("gpt-image-1")).toBe("imageGenerations");
+    expect(inferProviderApiMode("gpt-4.1-mini")).toBe("chatCompletions");
+    expect(getProviderModeLabel("imageGenerations")).toBe("图片生成");
+  });
+
+  it("recognizes assistant token modes", () => {
+    expect(isAssistantMode("low")).toBe(true);
+    expect(isAssistantMode("standard")).toBe(true);
+    expect(isAssistantMode("deep")).toBe(true);
+    expect(isAssistantMode("quiet")).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import React from "react";
-import type { AppConfig, AiControlMode, PendingAdminResume, ProviderConfig, ThemeMode } from "../vite-env";
-import { defaultProvider, getProviderId, isAiControlMode, isThemeMode } from "../ai/providers";
+import type { AppConfig, AiControlMode, AssistantMode, PendingAdminResume, ProviderConfig, ThemeMode } from "../vite-env";
+import { defaultProvider, getProviderId, inferProviderApiMode, isAiControlMode, isAssistantMode, isThemeMode } from "../ai/providers";
 import type { PrivilegeState } from "../components/settings/SettingsModal";
 import { createDesktopBridgeUnavailableError, formatActionableError } from "../app/errors";
 
@@ -14,6 +14,8 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
   const initialActiveProviderId = getProviderId(initialProviders, initialConfig?.activeProviderId, initialProviders[0].id);
   const initialTheme = isThemeMode(initialConfig?.theme) ? initialConfig.theme : "dark";
   const initialAiControlMode = isAiControlMode(initialConfig?.aiControlMode) ? initialConfig.aiControlMode : "safe";
+  const initialAssistantMode = isAssistantMode(initialConfig?.assistantMode) ? initialConfig.assistantMode : "standard";
+  const initialBrowserShowAdvancedControls = initialConfig?.browserShowAdvancedControls === true;
 
   const [providers, setProviders] = React.useState<ProviderConfig[]>(initialProviders);
   const [activeProviderId, setActiveProviderId] = React.useState(initialActiveProviderId);
@@ -21,7 +23,11 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
   const [lastProjectRoot, setLastProjectRoot] = React.useState<string | null>(initialConfig?.lastProjectRoot ?? null);
   const [providerTestStatus, setProviderTestStatus] = React.useState("");
   const [isTestingProvider, setIsTestingProvider] = React.useState(false);
+  const [providerModelOptions, setProviderModelOptions] = React.useState<Record<string, string[]>>({});
+  const [providerModelStatuses, setProviderModelStatuses] = React.useState<Record<string, string>>({});
+  const [isLoadingProviderModels, setIsLoadingProviderModels] = React.useState(false);
   const [aiControlMode, setAiControlMode] = React.useState<AiControlMode>(initialAiControlMode);
+  const [assistantMode, setAssistantMode] = React.useState<AssistantMode>(initialAssistantMode);
   const [hasSeenWelcome, setHasSeenWelcome] = React.useState(initialConfig?.hasSeenWelcome === true);
   const [hasSeenWorkspaceGuide, setHasSeenWorkspaceGuide] = React.useState(initialConfig?.hasSeenWorkspaceGuide === true);
   const [pendingAdminResume, setPendingAdminResume] = React.useState<PendingAdminResume | null>(
@@ -30,9 +36,12 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
   const [privilege, setPrivilege] = React.useState<PrivilegeState | null>(null);
   const [isRestartingAsAdmin, setIsRestartingAsAdmin] = React.useState(false);
   const [theme, setTheme] = React.useState<ThemeMode>(initialTheme);
+  const [browserShowAdvancedControls, setBrowserShowAdvancedControls] = React.useState(initialBrowserShowAdvancedControls);
 
   const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? providers[0] ?? defaultProvider;
   const editingProvider = providers.find((provider) => provider.id === editingProviderId) ?? activeProvider;
+  const providerModelStatus = providerModelStatuses[editingProvider.id] ?? "";
+  const lastModelLoadSignatureRef = React.useRef<Record<string, string>>({});
 
   const saveAppConfig = React.useCallback(
     async (patch: Partial<AppConfig> = {}) => {
@@ -51,13 +60,15 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         lastProjectRoot,
         theme,
         aiControlMode,
+        assistantMode,
+        browserShowAdvancedControls,
         hasSeenWelcome,
         hasSeenWorkspaceGuide,
         pendingAdminResume,
         ...patch,
       });
     },
-    [activeProviderId, aiControlMode, hasSeenWelcome, hasSeenWorkspaceGuide, lastProjectRoot, pendingAdminResume, providers, theme],
+    [activeProviderId, aiControlMode, assistantMode, browserShowAdvancedControls, hasSeenWelcome, hasSeenWorkspaceGuide, lastProjectRoot, pendingAdminResume, providers, theme],
   );
 
   const savePendingAdminResume = React.useCallback(
@@ -126,6 +137,34 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     [saveAppConfig, setStatus],
   );
 
+  const updateAssistantMode = React.useCallback(
+    async (nextMode: AssistantMode) => {
+      setAssistantMode(nextMode);
+      try {
+        await saveAppConfig({ assistantMode: nextMode });
+        return true;
+      } catch {
+        setStatus("助手模式已切换，但保存偏好失败");
+        return false;
+      }
+    },
+    [saveAppConfig, setStatus],
+  );
+
+  const updateBrowserShowAdvancedControls = React.useCallback(
+    async (nextValue: boolean) => {
+      setBrowserShowAdvancedControls(nextValue);
+      try {
+        await saveAppConfig({ browserShowAdvancedControls: nextValue });
+        return true;
+      } catch {
+        setStatus("浏览器高级操作区偏好已切换，但保存失败");
+        return false;
+      }
+    },
+    [saveAppConfig, setStatus],
+  );
+
   const refreshPrivilegeState = React.useCallback(async () => {
     if (!window.novayxk) return;
     try {
@@ -175,7 +214,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
       name: "新供应商",
       baseUrl: "https://api.example.com/v1",
       apiKey: "",
-      model: "model-name",
+      model: "",
       apiMode: "chatCompletions",
     };
     setProviders([...providers, nextProvider]);
@@ -227,6 +266,80 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     }
   }, [editingProvider, setStatus]);
 
+  const loadProviderModels = React.useCallback(
+    async (provider: ProviderConfig, options: { silent?: boolean; force?: boolean } = {}) => {
+      const baseUrl = provider.baseUrl.trim();
+      const apiKey = provider.apiKey.trim();
+      if (!baseUrl || !apiKey) {
+        setProviderModelStatuses((current) => ({
+          ...current,
+          [provider.id]: "",
+        }));
+        return [];
+      }
+
+      const signature = `${baseUrl}\n${apiKey}\n${provider.apiMode ?? "chatCompletions"}`;
+      if (!options.force && lastModelLoadSignatureRef.current[provider.id] === signature && providerModelOptions[provider.id]?.length) {
+        return providerModelOptions[provider.id];
+      }
+
+      setIsLoadingProviderModels(true);
+      if (!options.silent) {
+        setProviderModelStatuses((current) => ({ ...current, [provider.id]: "正在读取模型列表..." }));
+      }
+      try {
+        if (!window.novayxk) {
+          throw createDesktopBridgeUnavailableError("模型列表读取");
+        }
+
+        const result = await window.novayxk.listProviderModels(provider);
+        const models = Array.isArray(result.models) ? result.models.filter(Boolean) : [];
+        setProviderModelOptions((current) => ({ ...current, [provider.id]: models }));
+        lastModelLoadSignatureRef.current[provider.id] = signature;
+        setProviderModelStatuses((current) => ({
+          ...current,
+          [provider.id]: result.message || `已读取 ${models.length} 个模型`,
+        }));
+
+        if (models.length && !provider.model.trim()) {
+          updateActiveProvider({
+            model: models[0],
+            apiMode: inferProviderApiMode(models[0]),
+          });
+        }
+        return models;
+      } catch (error) {
+        const message = formatActionableError(error, "读取模型列表失败");
+        setProviderModelStatuses((current) => ({ ...current, [provider.id]: message }));
+        if (!options.silent) {
+          setStatus(message);
+        }
+        return [];
+      } finally {
+        setIsLoadingProviderModels(false);
+      }
+    },
+    [providerModelOptions, setStatus, updateActiveProvider],
+  );
+
+  React.useEffect(() => {
+    const baseUrl = editingProvider.baseUrl.trim();
+    const apiKey = editingProvider.apiKey.trim();
+    if (!baseUrl || !apiKey) {
+      setProviderModelStatuses((current) => ({
+        ...current,
+        [editingProvider.id]: "",
+      }));
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadProviderModels(editingProvider, { silent: true });
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [editingProvider.baseUrl, editingProvider.apiKey, editingProvider.apiMode, editingProvider.id, loadProviderModels]);
+
   return {
     providers,
     setProviders,
@@ -238,13 +351,18 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     setLastProjectRoot,
     providerTestStatus,
     isTestingProvider,
+    providerModelOptions,
+    providerModelStatus,
+    isLoadingProviderModels,
     aiControlMode,
+    assistantMode,
     hasSeenWelcome,
     hasSeenWorkspaceGuide,
     pendingAdminResume,
     privilege,
     isRestartingAsAdmin,
     theme,
+    browserShowAdvancedControls,
     activeProvider,
     editingProvider,
     saveAppConfig,
@@ -253,6 +371,8 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     switchActiveProvider,
     updateTheme,
     updateAiControlMode,
+    updateAssistantMode,
+    updateBrowserShowAdvancedControls,
     refreshPrivilegeState,
     restartAsAdmin,
     clearPendingAdminResume,
@@ -261,5 +381,6 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     addProvider,
     removeActiveProvider,
     testActiveProvider,
+    loadProviderModels,
   };
 }

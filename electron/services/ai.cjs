@@ -1,5 +1,9 @@
+const { isAbortError, requestText } = require("./http.cjs");
+
 let logAi = () => {};
 let logError = () => {};
+const IMAGE_GENERATION_TIMEOUT_MS = 10 * 60 * 1000;
+const IMAGE_GENERATION_RESPONSE_LIMIT_BYTES = 160 * 1024 * 1024;
 
 function createOptionalAbortTimeout(controller, timeoutMs) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -26,6 +30,9 @@ function createOptionalAbortTimeout(controller, timeoutMs) {
 async function requestChatCompletion(provider, messages, options = {}) {
   if (!provider?.baseUrl || !provider?.apiKey || !provider?.model) {
     throw new Error("供应商配置不完整。");
+  }
+  if (provider.apiMode === "imageGenerations") {
+    throw new Error("当前供应商配置为图片生成接口，请使用图片生成请求。");
   }
 
   const startedAt = Date.now();
@@ -108,6 +115,34 @@ async function requestChatCompletion(provider, messages, options = {}) {
   }
 }
 
+function buildProviderModelsEndpoint(baseUrl) {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Base URL 无效，请填写类似 https://api.openai.com/v1 的地址。");
+  }
+
+  const pathName = parsed.pathname.replace(/\/+$/, "");
+  const apiBase = pathName && pathName !== "/" ? trimmed : `${trimmed}/v1`;
+  return `${apiBase}/models`;
+}
+
+function buildProviderImageEndpoint(baseUrl) {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Base URL 无效，请填写类似 https://api.openai.com/v1 的地址。");
+  }
+
+  const pathName = parsed.pathname.replace(/\/+$/, "");
+  const apiBase = pathName && pathName !== "/" ? trimmed : `${trimmed}/v1`;
+  return `${apiBase}/images/generations`;
+}
+
 function buildProviderEndpoint(baseUrl, apiMode) {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   let parsed;
@@ -120,6 +155,169 @@ function buildProviderEndpoint(baseUrl, apiMode) {
   const pathName = parsed.pathname.replace(/\/+$/, "");
   const apiBase = pathName && pathName !== "/" ? trimmed : `${trimmed}/v1`;
   return apiMode === "responses" ? `${apiBase}/responses` : `${apiBase}/chat/completions`;
+}
+
+async function requestImageGeneration(provider, prompt, options = {}) {
+  if (!provider?.baseUrl || !provider?.apiKey || !provider?.model) {
+    throw new Error("供应商配置不完整。");
+  }
+  const normalizedPrompt = String(prompt || "").trim();
+  if (!normalizedPrompt) {
+    throw new Error("图片提示词不能为空。");
+  }
+
+  const startedAt = Date.now();
+  const controller = options.controller ?? new AbortController();
+  const timeout = createOptionalAbortTimeout(controller, options.timeoutMs ?? IMAGE_GENERATION_TIMEOUT_MS);
+  const endpoint = buildProviderImageEndpoint(provider.baseUrl);
+  const providerProfile = getProviderProfile(provider);
+  const imageCount = Math.max(1, Math.min(4, Number(options.n || 1)));
+  const body = {
+    model: provider.model,
+    prompt: normalizedPrompt,
+    n: imageCount,
+    size: String(options.size || "1024x1024"),
+  };
+  logAi("image:start", {
+    providerName: provider.name,
+    model: provider.model,
+    endpoint,
+    providerProfile,
+    imageCount,
+    size: body.size,
+  });
+
+  try {
+    const response = await requestText(endpoint, {
+      method: "POST",
+      headers: buildProviderHeaders(provider),
+      signal: controller.signal,
+      body: JSON.stringify(body),
+      maxBytes: IMAGE_GENERATION_RESPONSE_LIMIT_BYTES,
+    });
+    const responseText = response.text;
+    if (!response.ok) {
+      logAi("image:httpError", {
+        providerName: provider.name,
+        model: provider.model,
+        endpoint,
+        status: response.status,
+        elapsedMs: Date.now() - startedAt,
+        responsePreview: responseText.slice(0, 500),
+      }, "warn");
+      throw new Error(`图片生成失败：${response.status} ${formatProviderError(responseText, endpoint)}`);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      throw new Error(`图片生成接口没有返回 JSON。请检查 Base URL。当前请求：${endpoint}`);
+    }
+
+    if (!Array.isArray(parsed?.data) || parsed.data.length === 0) {
+      throw new Error("图片生成接口返回成功，但没有图片数据。");
+    }
+
+    logAi("image:done", {
+      providerName: provider.name,
+      model: provider.model,
+      endpoint,
+      imageCount: parsed.data.length,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return parsed;
+  } catch (error) {
+    logError("ai:image:error", error, {
+      providerName: provider?.name,
+      model: provider?.model,
+      endpoint,
+      elapsedMs: Date.now() - startedAt,
+    });
+    if (isAbortError(error)) {
+      if (!timeout.didTimeout() && options.abortMessage) {
+        throw new Error(options.abortMessage);
+      }
+      throw new Error("图片生成超时，请检查 Base URL、网络或供应商状态。");
+    }
+    throw error;
+  } finally {
+    timeout.clear();
+  }
+}
+
+async function listProviderModels(provider, options = {}) {
+  if (!provider?.baseUrl || !provider?.apiKey) {
+    throw new Error("请先填写 Base URL 和 API Key。");
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 20_000);
+  const endpoint = buildProviderModelsEndpoint(provider.baseUrl);
+  const providerProfile = getProviderProfile(provider);
+  logAi("models:start", {
+    providerName: provider.name,
+    endpoint,
+    providerProfile,
+  });
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: buildProviderHeaders(provider),
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      logAi("models:httpError", {
+        providerName: provider.name,
+        endpoint,
+        status: response.status,
+        elapsedMs: Date.now() - startedAt,
+        responsePreview: responseText.slice(0, 500),
+      }, "warn");
+      throw new Error(`读取模型列表失败：${response.status} ${formatProviderError(responseText, endpoint)}`);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      throw new Error(`模型列表接口没有返回 JSON。请检查 Base URL。当前请求：${endpoint}`);
+    }
+
+    const ids = Array.isArray(parsed?.data)
+      ? parsed.data
+          .map((item) => String(item?.id || "").trim())
+          .filter(Boolean)
+      : [];
+
+    if (!ids.length) {
+      throw new Error("模型列表接口返回成功，但没有可用模型。");
+    }
+
+    const models = [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+    logAi("models:done", {
+      providerName: provider.name,
+      endpoint,
+      modelCount: models.length,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return models;
+  } catch (error) {
+    logError("ai:models:error", error, {
+      providerName: provider?.name,
+      endpoint,
+      elapsedMs: Date.now() - startedAt,
+    });
+    if (error.name === "AbortError") {
+      throw new Error("读取模型列表超时，请检查 Base URL、网络或供应商状态。");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function getProviderProfile(provider) {
@@ -218,6 +416,9 @@ function extractStreamText(data, apiMode) {
 async function requestChatCompletionStream(provider, messages, onChunk, options = {}) {
   if (!provider?.baseUrl || !provider?.apiKey || !provider?.model) {
     throw new Error("供应商配置不完整。");
+  }
+  if (provider.apiMode === "imageGenerations") {
+    throw new Error("当前供应商配置为图片生成接口，请使用图片生成请求。");
   }
 
   const startedAt = Date.now();
@@ -329,6 +530,8 @@ function createAiService(loggers = {}) {
   logAi = loggers.logAi || logAi;
   logError = loggers.logError || logError;
   return {
+    listProviderModels,
+    requestImageGeneration,
     requestChatCompletion,
     requestChatCompletionStream,
     extractModelText,

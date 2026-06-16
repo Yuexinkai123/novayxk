@@ -1,23 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Novayxk icon">
   <defs>
-    <linearGradient id="field" x1="48" y1="24" x2="214" y2="226" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#123F3C"/>
-      <stop offset="0.52" stop-color="#245F9B"/>
-      <stop offset="1" stop-color="#C95D30"/>
+    <linearGradient id="field" x1="40" y1="24" x2="212" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#121820"/>
+      <stop offset="0.58" stop-color="#1A2430"/>
+      <stop offset="1" stop-color="#232F3D"/>
     </linearGradient>
-    <linearGradient id="nova" x1="74" y1="58" x2="181" y2="190" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFDF8"/>
-      <stop offset="0.58" stop-color="#BFE7E1"/>
-      <stop offset="1" stop-color="#F6C39B"/>
+    <linearGradient id="monogram" x1="72" y1="74" x2="188" y2="172" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F4F7FB"/>
+      <stop offset="1" stop-color="#C4D0E1"/>
     </linearGradient>
-    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#10201F" flood-opacity="0.24"/>
-    </filter>
   </defs>
-  <rect width="256" height="256" rx="54" fill="#F4F0E8"/>
-  <rect x="24" y="24" width="208" height="208" rx="46" fill="url(#field)" filter="url(#soft-shadow)"/>
-  <path d="M68 176V80h24l72 61V80h24v96h-22l-74-63v63H68Z" fill="url(#nova)"/>
-  <path d="M178 55l8 20 20 8-20 8-8 20-8-20-20-8 20-8 8-20Z" fill="#FFF7D6"/>
-  <path d="M70 196h116" stroke="#FFFDF8" stroke-width="10" stroke-linecap="round" opacity="0.88"/>
-  <path d="M84 198h78" stroke="#6ED4C7" stroke-width="4" stroke-linecap="round" opacity="0.95"/>
+  <rect width="256" height="256" rx="58" fill="#0B1016"/>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="url(#field)"/>
+  <rect x="34" y="34" width="188" height="188" rx="38" fill="#FFFFFF" opacity="0.035"/>
+  <rect x="66" y="76" width="24" height="102" rx="12" fill="url(#monogram)"/>
+  <rect x="166" y="76" width="24" height="102" rx="12" fill="url(#monogram)"/>
+  <path d="M84 88c3.6 0 7.1 1.3 9.9 3.7L176 163.9c4.7 4.1 5.1 11.2 1 15.9-4.1 4.7-11.2 5.1-15.9 1L79 108.6c-4.7-4.1-5.1-11.2-1-15.9A11.2 11.2 0 0 1 84 88Z" fill="url(#monogram)"/>
+  <circle cx="176" cy="70" r="10" fill="#D2B282"/>
+  <path d="M74 194h108" stroke="#A3B7D4" stroke-width="8" stroke-linecap="round" opacity="0.88"/>
+  <path d="M90 207h76" stroke="#6F8FBD" stroke-width="5" stroke-linecap="round"/>
 </svg>

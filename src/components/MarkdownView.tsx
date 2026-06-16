@@ -180,6 +180,7 @@ function getCodeLanguageLabel(language: string, forceLabel?: string) {
   if (/^(?:powershell|powershell-run|ps-run|pwsh)$/i.test(language)) return "PowerShell";
   if (/^(?:cmd|bat)$/i.test(language)) return "CMD";
   if (/^(?:bash|shell|shell-run)$/i.test(language)) return "Shell";
+  if (/^browser-actions$/i.test(language)) return "Browser Actions";
   if (/^(?:text|plaintext)?$/i.test(language)) return "文本";
   return language || "命令";
 }

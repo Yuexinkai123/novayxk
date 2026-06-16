@@ -14,6 +14,7 @@ const manualRceditX86 = path.join(manualWinCodeSign, "rcedit-x86.exe");
 const manualSignTool = path.join(manualWinCodeSign, "windows-10", "x64", "signtool.exe");
 const manualNsis = path.join(builderCache, "nsis", "manual");
 const manualNsisResources = path.join(builderCache, "nsis-resources", "manual");
+const unpackedAsar = path.join(root, "dist-release", "win-unpacked", "resources", "app.asar");
 
 fs.mkdirSync(localAppData, { recursive: true });
 fs.mkdirSync(builderCache, { recursive: true });
@@ -28,6 +29,71 @@ const localToolEnv = {};
 if (!fs.existsSync(manualRceditX86) && fs.existsSync(manualRceditIa32)) {
   fs.copyFileSync(manualRceditIa32, manualRceditX86);
 }
+
+function isFileLocked(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  const probePath = `${filePath}.lockcheck-${process.pid}`;
+  try {
+    fs.renameSync(filePath, probePath);
+    fs.renameSync(probePath, filePath);
+    return false;
+  } catch (error) {
+    if (fs.existsSync(probePath) && !fs.existsSync(filePath)) {
+      try {
+        fs.renameSync(probePath, filePath);
+      } catch {
+        // If this ever fails, let the original lock/error path explain the packaging problem.
+      }
+    }
+    if (error && (error.code === "EBUSY" || error.code === "EPERM" || error.code === "EACCES")) {
+      return true;
+    }
+    return false;
+  }
+}
+
+function listLikelyLockingProcesses() {
+  if (process.platform !== "win32") return "";
+  const script = [
+    "$items = Get-CimInstance Win32_Process |",
+    "Where-Object {",
+    "$_.Name -in @('Novayxk.exe','electron.exe') -or",
+    "$_.ExecutablePath -like '*Novayxk*' -or",
+    "$_.CommandLine -like '*Novayxk*' -or",
+    "$_.CommandLine -like '*dist-release*'",
+    "} | Select-Object -First 20 ProcessId,Name,@{Name='Path';Expression={$_.ExecutablePath}};",
+    "$items | Format-Table -AutoSize",
+  ].join(" ");
+  const result = childProcess.spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  return `${result.stdout || ""}${result.stderr || ""}`.trim();
+}
+
+function assertPreviousBuildNotLocked() {
+  if (!isFileLocked(unpackedAsar)) return;
+
+  console.error("");
+  console.error("Cannot package Novayxk because the previous unpacked app is still locked:");
+  console.error(`  ${unpackedAsar}`);
+  console.error("");
+  console.error("Close any running Novayxk/Electron windows, then run npm run package:custom again.");
+  console.error("If the window is already closed, wait a few seconds for Windows Defender or Explorer to release app.asar.");
+  const processes = listLikelyLockingProcesses();
+  if (processes) {
+    console.error("");
+    console.error("Likely related processes:");
+    console.error(processes);
+  }
+  console.error("");
+  console.error("Manual cleanup command if needed:");
+  console.error("  Get-Process Novayxk,electron -ErrorAction SilentlyContinue | Stop-Process");
+  console.error("");
+  process.exit(1);
+}
+
+assertPreviousBuildNotLocked();
 
 function prepareLocalArchive({ cacheName, archiveName, outputDir, probeFile }) {
   if (fs.existsSync(probeFile)) {

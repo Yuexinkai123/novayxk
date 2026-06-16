@@ -1,15 +1,13 @@
 import React from "react";
 import { extractFileOps, extractPatch, extractPatchFiles } from "../ai/chat";
-import type { AiControlMode, ChatMessage, FileOperation, ProjectPayload } from "../vite-env";
+import type { AiControlMode, ChatMessage, FileOperation, ProjectPayload, ProjectSelectedFile } from "../vite-env";
 import type { ConfirmDialogState } from "../components/dialogs/ConfirmDialog";
 import { createDesktopBridgeUnavailableError, formatActionableError } from "../app/errors";
-
-type SelectedFile = { path: string; content: string } | null;
 
 type UseWorkspaceActionsOptions = {
   displayedMessage: string;
   project: ProjectPayload | null;
-  selectedFile: SelectedFile;
+  selectedFile: ProjectSelectedFile | null;
   canUndoPatch: boolean;
   isLoading: boolean;
   setIsLoading: (value: boolean) => void;
@@ -170,7 +168,8 @@ export function useWorkspaceActions({
         throw createDesktopBridgeUnavailableError("执行文件操作");
       }
       const result = await window.novayxk.applyFileOps(operations);
-      const firstWrittenFile = operations.find((operation) => operation.type === "write")?.path ?? null;
+      const firstWrittenFile =
+        operations.find((operation) => operation.type === "write" || operation.type === "replace")?.path ?? null;
       const selectedWasChanged = selectedFile ? result.changedFiles.includes(selectedFile.path) : false;
       await syncProjectView({
         preferredPath: selectedWasChanged ? selectedFile?.path ?? null : firstWrittenFile,

@@ -74,45 +74,74 @@ function sampleIcon(size, x, y) {
   const px = x / scale;
   const py = y / scale;
 
-  if (!roundedRect(px, py, 0, 0, 256, 256, 54)) return rgba(0, 0, 0, 0);
+  if (!roundedRect(px, py, 0, 0, 256, 256, 58)) return rgba(0, 0, 0, 0);
 
-  let color = rgba(244, 240, 232, 255);
-  if (roundedRect(px, py, 24, 24, 208, 208, 46)) {
-    color = gradient(px, py);
+  let color = rgba(11, 16, 22, 255);
+  if (roundedRect(px, py, 14, 14, 228, 228, 50)) {
+    color = fieldGradient(px, py);
   }
 
-  if (inNShape(px, py)) {
-    color = mix(rgba(255, 253, 248, 255), rgba(246, 195, 155, 255), clamp((py - 58) / 132, 0, 1));
+  const topGlow = Math.max(0, 1 - Math.hypot(px - 64, py - 36) / 118);
+  const lowGlow = Math.max(0, 1 - Math.hypot(px - 196, py - 232) / 138);
+  color = mix(color, rgba(108, 136, 176, 255), topGlow * 0.12);
+  color = mix(color, rgba(93, 128, 115, 255), lowGlow * 0.08);
+
+  if (roundedRect(px, py, 34, 34, 188, 188, 38)) {
+    color = mix(color, rgba(255, 255, 255, 255), 0.035);
   }
 
-  if (inSpark(px, py)) {
-    color = rgba(255, 247, 214, 255);
+  if (inLeftStem(px, py) || inRightStem(px, py) || inDiagonalStem(px, py)) {
+    color = monogramGradient(px, py);
   }
 
-  const underlineOuter = distanceToSegment(px, py, 70, 196, 186, 196) <= 5;
-  if (underlineOuter) color = rgba(255, 253, 248, 230);
+  if (inAccentDot(px, py)) {
+    color = rgba(210, 178, 130, 255);
+  }
 
-  const underlineInner = distanceToSegment(px, py, 84, 198, 162, 198) <= 2;
-  if (underlineInner) color = rgba(110, 212, 199, 245);
+  if (distanceToSegment(px, py, 74, 194, 182, 194) <= 4.25) {
+    color = rgba(163, 183, 212, 220);
+  }
+
+  if (distanceToSegment(px, py, 90, 207, 166, 207) <= 2.5) {
+    color = rgba(111, 143, 189, 240);
+  }
 
   return color;
+}
+
+function fieldGradient(x, y) {
+  const t = clamp((x * 0.28 + y * 0.9) / 256, 0, 1);
+  if (t < 0.55) {
+    return mix(rgba(16, 21, 28, 255), rgba(25, 35, 46, 255), t / 0.55);
+  }
+  return mix(rgba(25, 35, 46, 255), rgba(32, 43, 57, 255), (t - 0.55) / 0.45);
+}
+
+function monogramGradient(x, y) {
+  const t = clamp((x * 0.45 + y * 0.4) / 256, 0, 1);
+  return mix(rgba(244, 247, 251, 255), rgba(196, 208, 225, 255), t);
+}
+
+function inLeftStem(x, y) {
+  return roundedRect(x, y, 66, 76, 24, 102, 12);
+}
+
+function inRightStem(x, y) {
+  return roundedRect(x, y, 166, 76, 24, 102, 12);
+}
+
+function inDiagonalStem(x, y) {
+  return distanceToSegment(x, y, 84, 88, 176, 168) <= 14;
+}
+
+function inAccentDot(x, y) {
+  return (x - 176) ** 2 + (y - 70) ** 2 <= 10 ** 2;
 }
 
 function roundedRect(x, y, rx, ry, width, height, radius) {
   const cx = clamp(x, rx + radius, rx + width - radius);
   const cy = clamp(y, ry + radius, ry + height - radius);
   return (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2;
-}
-
-function inNShape(x, y) {
-  const left = x >= 68 && x <= 92 && y >= 80 && y <= 176;
-  const right = x >= 164 && x <= 188 && y >= 80 && y <= 176;
-  const diagonal = distanceToSegment(x, y, 88, 91, 171, 164) <= 15;
-  return left || right || diagonal;
-}
-
-function inSpark(x, y) {
-  return Math.abs(x - 178) / 28 + Math.abs(y - 83) / 28 <= 1;
 }
 
 function distanceToSegment(px, py, x1, y1, x2, y2) {
@@ -123,14 +152,6 @@ function distanceToSegment(px, py, x1, y1, x2, y2) {
   const x = x1 + t * dx;
   const y = y1 + t * dy;
   return Math.hypot(px - x, py - y);
-}
-
-function gradient(x, y) {
-  const t = clamp((x * 0.45 + y * 0.75) / 256, 0, 1);
-  if (t < 0.56) {
-    return mix(rgba(18, 63, 60, 255), rgba(36, 95, 155, 255), t / 0.56);
-  }
-  return mix(rgba(36, 95, 155, 255), rgba(201, 93, 48, 255), (t - 0.56) / 0.44);
 }
 
 function mix(a, b, t) {

@@ -60,8 +60,17 @@ describe("config service secure storage", () => {
       lastProjectRoot: "D:/repo",
       theme: "dark",
       aiControlMode: "safe",
+      assistantMode: "low",
       hasSeenWelcome: true,
       hasSeenWorkspaceGuide: true,
+      workspaceLayout: {
+        leftPanelWidth: 302,
+        rightPanelWidth: 688,
+        bottomPanelHeight: 260,
+        isLeftCollapsed: false,
+        isRightCollapsed: false,
+        isBottomCollapsed: true,
+      },
       pendingAdminResume: {
         action: "run-command",
         source: "ai",
@@ -84,8 +93,11 @@ describe("config service secure storage", () => {
 
     const config = await service.readConfig();
     expect(config.providers[0].apiKey).toBe("sk-secret");
+    expect(config.assistantMode).toBe("low");
     expect(config.hasSeenWelcome).toBe(true);
     expect(config.hasSeenWorkspaceGuide).toBe(true);
+    expect(config.workspaceLayout?.rightPanelWidth).toBe(688);
+    expect(config.workspaceLayout?.isBottomCollapsed).toBe(true);
     expect(config.pendingAdminResume?.command).toBe("winget uninstall --id Tencent.QQLive");
     expect(config.pendingAdminResume?.messages?.[0]?.content).toBe("卸载腾讯视频");
   });
@@ -120,5 +132,52 @@ describe("config service secure storage", () => {
     const migrated = JSON.parse(await fs.readFile(configFile, "utf8"));
     expect(migrated.providers[0].apiKey).toBeUndefined();
     expect(migrated.providers[0].apiKeyEncrypted).toBeTruthy();
+  });
+
+  it("preserves image generation provider mode", async () => {
+    const { service } = await createTempConfigService();
+
+    await service.writeConfig({
+      providers: [
+        {
+          id: "provider-image",
+          name: "OpenAI Images",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-secret",
+          model: "gpt-image-1",
+          apiMode: "imageGenerations",
+        },
+      ],
+      activeProviderId: "provider-image",
+    });
+
+    const config = await service.readConfig();
+    expect(config.providers[0].apiMode).toBe("imageGenerations");
+  });
+
+  it("migrates obvious image models away from chat completions mode", async () => {
+    const { configFile, service } = await createTempConfigService();
+
+    await fs.mkdir(path.dirname(configFile), { recursive: true });
+    await fs.writeFile(
+      configFile,
+      JSON.stringify({
+        providers: [
+          {
+            id: "provider-image-legacy",
+            name: "Legacy Images",
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "sk-secret",
+            model: "gpt-image-1",
+            apiMode: "chatCompletions",
+          },
+        ],
+        activeProviderId: "provider-image-legacy",
+      }),
+      "utf8",
+    );
+
+    const config = await service.readConfig();
+    expect(config.providers[0].apiMode).toBe("imageGenerations");
   });
 });

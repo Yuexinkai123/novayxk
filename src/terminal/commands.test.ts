@@ -51,8 +51,9 @@ describe("terminal command guards", () => {
     const state = createCommandLoopState();
     const command = [{ command: "npm run build", source: "block" as const }];
 
-    expect(inspectCommandLoop(command, state).shouldStop).toBe(false);
-    expect(inspectCommandLoop(command, state).shouldStop).toBe(false);
+    for (let index = 0; index < 9; index += 1) {
+      expect(inspectCommandLoop(command, state).shouldStop).toBe(false);
+    }
     expect(inspectCommandLoop(command, state).shouldStop).toBe(true);
   });
 });

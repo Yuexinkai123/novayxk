@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, safeStorage } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, safeStorage, session, protocol, net, clipboard, nativeImage } = require("electron");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const os = require("node:os");
@@ -10,6 +11,7 @@ const { createConfigService } = require("./services/config.cjs");
 const { inspectCommand, inspectCommandForMode, detectCommandScope } = require("./services/command.cjs");
 const { createMemoryService } = require("./services/memory.cjs");
 const { createAiService } = require("./services/ai.cjs");
+const { getHeaderValue, isAbortError, requestBuffer } = require("./services/http.cjs");
 const { createProjectService } = require("./services/project.cjs");
 const { createInstallerService } = require("./services/installer.cjs");
 
@@ -18,6 +20,7 @@ const NOVAYXK_HOME = path.join(os.homedir(), ".novayxk");
 const CONFIG_DIR = path.join(NOVAYXK_HOME, "config");
 const CONFIG_FILE = path.join(CONFIG_DIR, "providers.json");
 const PROJECTS_DIR = path.join(NOVAYXK_HOME, "projects");
+const GENERATED_IMAGES_DIR = path.join(NOVAYXK_HOME, "generated-images");
 const ICON_PATH = path.join(__dirname, "..", "assets", "icons", "novayxk.ico");
 const APP_EXE = "Novayxk.exe";
 const UNINSTALLER_EXE = "Novayxk Uninstaller.exe";
@@ -54,6 +57,16 @@ const PROJECT_WALK_DEPTH_LIMIT = 12;
 const MAX_TERMINAL_OUTPUT_BYTES = 80_000;
 const MAX_TERMINAL_TASKS = 20;
 const TERMINAL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+const BROWSER_START_URL = "https://www.baidu.com/";
+const BROWSER_PARTITION = "novayxk-browser";
+const BROWSER_GUEST_PRELOAD_URL = pathToFileURL(path.join(__dirname, "browser-preload.cjs")).toString();
+const MAX_BROWSER_ACTION_LOGS = 200;
+const MAX_BROWSER_NETWORK_LOGS = 300;
+const BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS = 12_000;
+const BROWSER_TRACE_PREVIEW_BYTES = 80_000;
+const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024;
+const IMAGE_GENERATION_TIMEOUT_MS = 10 * 60 * 1000;
+const IMAGE_GENERATION_ABORT_MESSAGE = "用户已停止本次生成。";
 const TEXT_FILE_EXTENSIONS = new Set([
   ".cjs",
   ".css",
@@ -106,11 +119,520 @@ const ADMIN_REQUIRED_COMMANDS = [
   { label: "PowerShell 管理员启动", pattern: /\bstart-process\b[\s\S]*\b-verb\s+runas\b/i },
 ];
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "novayxk-image",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+  {
+    scheme: "novayxk-project",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+]);
+
 let mainWindow;
+let browserWorkspaceWindow = null;
+let browserWorkspaceReady = false;
+let browserTraceFile = null;
+const browserWorkspaceReadyResolvers = new Set();
 let activeProjectRoot = null;
 const patchTransactions = [];
 const activeChatStreams = new Map();
+let activeImageGenerationController = null;
 const terminalTasks = new Map();
+const browserActionLogs = [];
+const browserNetworkLogs = [];
+const browserRequestMeta = new Map();
+let browserSnapshot = createBrowserSnapshot();
+let browserSessionObserversInstalled = false;
+
+function createBrowserSnapshot() {
+  return {
+    currentUrl: BROWSER_START_URL,
+    title: "Browser Workspace",
+    canGoBack: false,
+    canGoForward: false,
+    isLoading: false,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+function serializeBrowserSnapshot() {
+  return { ...browserSnapshot };
+}
+
+function updateBrowserSnapshot(patch = {}) {
+  browserSnapshot = {
+    ...browserSnapshot,
+    ...patch,
+  };
+  return serializeBrowserSnapshot();
+}
+
+function sendBrowserEventToRenderer(channel, payload) {
+  const targets = [mainWindow, browserWorkspaceWindow];
+  for (const target of targets) {
+    if (!target || target.isDestroyed()) continue;
+    target.webContents?.send(channel, payload);
+  }
+}
+
+function shouldRedactBrowserTraceKey(key) {
+  return /(authorization|cookie|set-cookie|token|secret|password|passwd|pwd|credential|session|csrf|xsrf|api[-_]?key|验证码|密码)/i.test(String(key || ""));
+}
+
+function redactBrowserTraceValue(value, key = "") {
+  if (value == null) return value;
+  if (shouldRedactBrowserTraceKey(key)) return "[redacted]";
+  if (Array.isArray(value)) return value.map((item) => redactBrowserTraceValue(item, key));
+  if (typeof value === "object") {
+    const output = {};
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      output[entryKey] = redactBrowserTraceValue(entryValue, entryKey);
+    }
+    return output;
+  }
+  const text = String(value);
+  if (shouldRedactBrowserTraceKey(text)) return "[redacted]";
+  return text.length > 4000 ? `${text.slice(0, 4000)}...[truncated]` : value;
+}
+
+function sanitizeBrowserTraceRecord(record) {
+  return redactBrowserTraceValue(record);
+}
+
+async function appendBrowserTraceRecord(kind, payload) {
+  if (!browserTraceFile) return;
+  const record = sanitizeBrowserTraceRecord({
+    kind,
+    createdAt: new Date().toISOString(),
+    payload,
+  });
+  try {
+    await fs.appendFile(browserTraceFile, `${JSON.stringify(record)}\n`, "utf8");
+  } catch (error) {
+    logError("browser:trace:appendFailed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function ensureBrowserTraceFile() {
+  if (browserTraceFile) {
+    return browserTraceFile;
+  }
+  const tracePath = await createBrowserTraceFile();
+  const replayRecords = [
+    ...browserActionLogs.map((payload) => ({ kind: "action", createdAt: payload.createdAt, payload })),
+    ...browserNetworkLogs.map((payload) => ({ kind: "network", createdAt: payload.createdAt, payload })),
+  ].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  if (replayRecords.length) {
+    const content = replayRecords
+      .map((record) => JSON.stringify(sanitizeBrowserTraceRecord(record)))
+      .join("\n");
+    await fs.appendFile(tracePath, `${content}\n`, "utf8");
+  }
+  return tracePath;
+}
+
+async function readBrowserTracePreview({ createIfMissing = false } = {}) {
+  if (!browserTraceFile && createIfMissing) {
+    await ensureBrowserTraceFile();
+  }
+  if (!browserTraceFile) {
+    return { path: "", preview: "" };
+  }
+  try {
+    const stat = await fs.stat(browserTraceFile);
+    const handle = await fs.open(browserTraceFile, "r");
+    try {
+      const size = Math.min(stat.size, BROWSER_TRACE_PREVIEW_BYTES);
+      const buffer = Buffer.alloc(size);
+      await handle.read(buffer, 0, size, Math.max(0, stat.size - size));
+      return {
+        path: browserTraceFile,
+        preview: buffer.toString("utf8"),
+      };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return { path: browserTraceFile, preview: "" };
+  }
+}
+
+async function deleteBrowserTraceFile() {
+  const tracePath = browserTraceFile;
+  browserTraceFile = null;
+  if (!tracePath) return;
+  try {
+    await fs.rm(tracePath, { force: true });
+  } catch {
+    // Temporary trace cleanup is best-effort.
+  }
+}
+
+async function createBrowserTraceFile() {
+  await deleteBrowserTraceFile();
+  const traceDir = path.join(os.tmpdir(), "novayxk-browser-traces");
+  await fs.mkdir(traceDir, { recursive: true });
+  browserTraceFile = path.join(traceDir, `browser-trace-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jsonl`);
+  await fs.writeFile(
+    browserTraceFile,
+    `${JSON.stringify({
+      kind: "session-start",
+      createdAt: new Date().toISOString(),
+      payload: {
+        startUrl: browserSnapshot.currentUrl,
+      },
+    })}\n`,
+    "utf8",
+  );
+  return browserTraceFile;
+}
+
+function pushBrowserActionLog(record) {
+  browserActionLogs.unshift(record);
+  if (browserActionLogs.length > MAX_BROWSER_ACTION_LOGS) {
+    browserActionLogs.length = MAX_BROWSER_ACTION_LOGS;
+  }
+  void appendBrowserTraceRecord("action", record);
+  sendBrowserEventToRenderer("browser:actionEvent", record);
+}
+
+function pushBrowserNetworkLog(record) {
+  const existing = browserNetworkLogs.find((item) => item.id === record.id);
+  const mergedRecord = existing ? { ...existing, ...record } : record;
+  const index = browserNetworkLogs.findIndex((item) => item.id === record.id);
+  if (index >= 0) {
+    browserNetworkLogs.splice(index, 1);
+  }
+  browserNetworkLogs.unshift(mergedRecord);
+  if (browserNetworkLogs.length > MAX_BROWSER_NETWORK_LOGS) {
+    browserNetworkLogs.length = MAX_BROWSER_NETWORK_LOGS;
+  }
+  void appendBrowserTraceRecord("network", mergedRecord);
+  sendBrowserEventToRenderer("browser:networkEvent", mergedRecord);
+}
+
+function emitBrowserPageEvent(type) {
+  const payload = {
+    type,
+    snapshot: serializeBrowserSnapshot(),
+  };
+  void appendBrowserTraceRecord("page", payload);
+  sendBrowserEventToRenderer("browser:pageEvent", payload);
+}
+
+function normalizeBrowserUrl(input) {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) return BROWSER_START_URL;
+  if (/^(?:https?|file|about):/i.test(trimmed)) return trimmed;
+  return `https://${trimmed.replace(/^\/+/, "")}`;
+}
+
+function getMainWebContents() {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("主窗口不可用。");
+  return mainWindow.webContents;
+}
+
+function handleBrowserNavigate(targetUrl) {
+  const nextUrl = normalizeBrowserUrl(targetUrl);
+  updateBrowserSnapshot({
+    currentUrl: nextUrl,
+    isLoading: true,
+  });
+  void appendBrowserTraceRecord("command", {
+    type: "navigate",
+    url: nextUrl,
+  });
+  emitBrowserPageEvent("did-start-loading");
+  return serializeBrowserSnapshot();
+}
+
+function isInsideDirectory(parentDir, targetPath) {
+  const relative = path.relative(path.resolve(parentDir), path.resolve(targetPath));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function assertGeneratedImageFile(imagePath) {
+  const targetPath = path.resolve(String(imagePath || ""));
+  if (!isInsideDirectory(GENERATED_IMAGES_DIR, targetPath)) {
+    throw new Error("图片路径无效。");
+  }
+  return targetPath;
+}
+
+function sanitizeGeneratedImageFileName(fileName) {
+  const normalized = String(fileName || "")
+    .replace(/[<>:"|?*\u0000-\u001f]/g, "-")
+    .replace(/[\\/]+/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .join("/");
+  return normalized.replace(/^\.+/, "").trim();
+}
+
+function buildDefaultGeneratedImageProjectPath(imagePath) {
+  const extension = path.extname(imagePath) || ".png";
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+  return `generated-image-${stamp}${extension}`;
+}
+
+async function ensureUniqueProjectImagePath(relativePath) {
+  const targetPath = assertProjectFile(relativePath);
+  try {
+    await fs.access(targetPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return relativePath;
+    }
+    throw error;
+  }
+
+  const extension = path.extname(relativePath);
+  const baseName = extension ? relativePath.slice(0, -extension.length) : relativePath;
+  for (let index = 2; index < 10_000; index += 1) {
+    const nextRelativePath = `${baseName}-${index}${extension}`;
+    try {
+      await fs.access(assertProjectFile(nextRelativePath));
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return nextRelativePath;
+      }
+      throw error;
+    }
+  }
+  throw new Error("图片文件名冲突过多，请手动指定文件名。");
+}
+
+function resolveGeneratedImageProtocolPath(requestUrl) {
+  const parsed = new URL(requestUrl);
+  const rawRelative = decodeURIComponent(`${parsed.hostname}${parsed.pathname}`).replace(/^\/+/, "");
+  if (!rawRelative) {
+    throw new Error("图片地址无效。");
+  }
+  const targetPath = path.resolve(GENERATED_IMAGES_DIR, rawRelative);
+  if (!isInsideDirectory(GENERATED_IMAGES_DIR, targetPath)) {
+    throw new Error("图片地址越界。");
+  }
+  return targetPath;
+}
+
+function buildGeneratedImageUrl(imagePath) {
+  const relativePath = path.relative(GENERATED_IMAGES_DIR, imagePath)
+    .split(path.sep)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `novayxk-image://${relativePath}`;
+}
+
+function resolveProjectProtocolPath(requestUrl) {
+  const parsed = new URL(requestUrl);
+  const rawRelative = decodeURIComponent(`${parsed.hostname}${parsed.pathname}`).replace(/^\/+/, "");
+  if (!rawRelative) {
+    throw new Error("项目文件地址无效。");
+  }
+  return assertProjectFile(rawRelative);
+}
+
+function buildProjectFileUrl(relativePath) {
+  const encodedPath = String(relativePath || "")
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `novayxk-project://${encodedPath}`;
+}
+
+function getProjectFileMimeType(relativePath) {
+  const extension = path.extname(String(relativePath || "")).toLowerCase();
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".webp") return "image/webp";
+  if (extension === ".gif") return "image/gif";
+  if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".bmp") return "image/bmp";
+  return "image/png";
+}
+
+function registerGeneratedImageProtocol() {
+  protocol.handle("novayxk-image", (request) => {
+    const targetPath = resolveGeneratedImageProtocolPath(request.url);
+    return net.fetch(pathToFileURL(targetPath).toString());
+  });
+}
+
+function registerProjectFileProtocol() {
+  protocol.handle("novayxk-project", (request) => {
+    const targetPath = resolveProjectProtocolPath(request.url);
+    return net.fetch(pathToFileURL(targetPath).toString());
+  });
+}
+
+function parseImageDataUrl(value) {
+  const match = String(value || "").match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
+  if (!match) return null;
+  return {
+    mimeType: match[1].toLowerCase(),
+    base64: match[2],
+  };
+}
+
+function sniffImageMimeType(buffer, fallback = "image/png") {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP") {
+    return "image/webp";
+  }
+  if (buffer.length >= 6 && /^GIF8[79]a$/.test(buffer.subarray(0, 6).toString("ascii"))) {
+    return "image/gif";
+  }
+  return fallback;
+}
+
+function getImageExtension(mimeType) {
+  if (/jpe?g/i.test(mimeType)) return "jpg";
+  if (/webp/i.test(mimeType)) return "webp";
+  if (/gif/i.test(mimeType)) return "gif";
+  return "png";
+}
+
+async function downloadGeneratedImageUrl(url, timeoutMs = IMAGE_GENERATION_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await requestBuffer(url, {
+      method: "GET",
+      signal: controller.signal,
+      maxBytes: MAX_GENERATED_IMAGE_BYTES + 1,
+    });
+    if (!response.ok) {
+      throw new Error(`下载生成图片失败：${response.status}`);
+    }
+    return {
+      buffer: response.body,
+      mimeType: sniffImageMimeType(response.body, getHeaderValue(response.headers, "content-type") || "image/png"),
+    };
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error("下载生成图片超时，请检查网络或供应商状态。");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readGeneratedImageBytes(item, options = {}) {
+  const base64Source = typeof item?.b64_json === "string"
+    ? { mimeType: String(item?.mime_type || "image/png"), base64: item.b64_json }
+    : parseImageDataUrl(item?.image ?? item?.data ?? "");
+  if (base64Source?.base64) {
+    const buffer = Buffer.from(base64Source.base64, "base64");
+    return {
+      buffer,
+      mimeType: sniffImageMimeType(buffer, base64Source.mimeType || "image/png"),
+    };
+  }
+
+  if (typeof item?.url === "string" && item.url.trim()) {
+    return downloadGeneratedImageUrl(item.url, options.timeoutMs ?? IMAGE_GENERATION_TIMEOUT_MS);
+  }
+
+  throw new Error("图片生成结果缺少 b64_json 或 url。");
+}
+
+async function saveGeneratedImageItem(item, prompt, index, options = {}) {
+  const { buffer, mimeType } = await readGeneratedImageBytes(item, options);
+  if (!buffer.length) throw new Error("图片生成结果为空。");
+  if (buffer.length > MAX_GENERATED_IMAGE_BYTES) {
+    throw new Error("生成图片过大，已拒绝保存。");
+  }
+
+  await fs.mkdir(GENERATED_IMAGES_DIR, { recursive: true });
+  const extension = getImageExtension(mimeType);
+  const fileName = `image-${Date.now()}-${index + 1}-${crypto.randomBytes(4).toString("hex")}.${extension}`;
+  const imagePath = path.join(GENERATED_IMAGES_DIR, fileName);
+  await fs.writeFile(imagePath, buffer);
+  return {
+    type: "image",
+    path: imagePath,
+    url: buildGeneratedImageUrl(imagePath),
+    mimeType,
+    prompt: String(prompt || "").slice(0, 4000),
+    revisedPrompt: String(item?.revised_prompt || item?.revisedPrompt || "").slice(0, 4000),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function installBrowserSessionObservers() {
+  if (browserSessionObserversInstalled) return;
+  browserSessionObserversInstalled = true;
+  const browserSession = session.fromPartition(BROWSER_PARTITION);
+
+  browserSession.webRequest.onBeforeRequest((details, callback) => {
+    browserRequestMeta.set(details.id, {
+      startedAt: Date.now(),
+      method: details.method,
+      url: details.url,
+      resourceType: details.resourceType,
+    });
+    pushBrowserNetworkLog({
+      id: String(details.id),
+      url: details.url,
+      method: details.method,
+      stage: "request",
+      resourceType: details.resourceType,
+      source: "webRequest",
+      createdAt: new Date().toISOString(),
+    });
+    callback({});
+  });
+
+  browserSession.webRequest.onCompleted((details) => {
+    const meta = browserRequestMeta.get(details.id);
+    pushBrowserNetworkLog({
+      id: String(details.id),
+      url: details.url,
+      method: details.method,
+      stage: "response",
+      statusCode: details.statusCode,
+      resourceType: details.resourceType,
+      durationMs: meta ? Math.max(0, Date.now() - meta.startedAt) : undefined,
+      source: "webRequest",
+      createdAt: new Date().toISOString(),
+    });
+    browserRequestMeta.delete(details.id);
+  });
+
+  browserSession.webRequest.onErrorOccurred((details) => {
+    const meta = browserRequestMeta.get(details.id);
+    pushBrowserNetworkLog({
+      id: String(details.id),
+      url: details.url,
+      method: details.method,
+      stage: "error",
+      resourceType: details.resourceType,
+      durationMs: meta ? Math.max(0, Date.now() - meta.startedAt) : undefined,
+      errorText: details.error,
+      source: "webRequest",
+      createdAt: new Date().toISOString(),
+    });
+    browserRequestMeta.delete(details.id);
+  });
+}
 
 function getArgValue(args, name) {
   const index = args.indexOf(name);
@@ -154,7 +676,7 @@ const memoryService = createMemoryService({
   getActiveProjectRoot: () => activeProjectRoot,
 });
 const { readProjectMemoryState, writeProjectMemory, saveTaskHistory, loadTaskHistory } = memoryService;
-const { requestChatCompletion, requestChatCompletionStream, extractModelText } = createAiService({
+const { listProviderModels, requestImageGeneration, requestChatCompletion, requestChatCompletionStream, extractModelText } = createAiService({
   logAi,
   logError,
 });
@@ -238,9 +760,11 @@ function createWindow() {
       preload: path.join(__dirname, isUninstallMode ? "uninstaller-preload.cjs" : "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      webviewTag: true,
     },
   });
   mainWindow.setMenu(null);
+  installBrowserSessionObservers();
 
   if (isUninstallMode) {
     writeDebugLog("loadFile", {
@@ -271,6 +795,118 @@ function createWindow() {
   }
 }
 
+function loadRendererTarget(targetWindow, options = {}) {
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  const browserWorkspaceQuery = options.browserWorkspace ? "?novayxk-browser-window=1" : "";
+  if (isDev) {
+    targetWindow.loadURL(`http://127.0.0.1:5173/${browserWorkspaceQuery}`);
+    return;
+  }
+  targetWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+    query: options.browserWorkspace ? { "novayxk-browser-window": "1" } : {},
+  });
+}
+
+function createBrowserWorkspaceWindow(options = {}) {
+  const shouldFocus = options.focus !== false;
+  if (browserWorkspaceWindow && !browserWorkspaceWindow.isDestroyed()) {
+    if (shouldFocus) {
+      if (browserWorkspaceWindow.isMinimized()) browserWorkspaceWindow.restore();
+      browserWorkspaceWindow.show();
+      browserWorkspaceWindow.focus();
+    }
+    void ensureBrowserTraceFile().catch((error) => {
+      logError("browser:trace:ensureFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+    return browserWorkspaceWindow;
+  }
+
+  browserWorkspaceWindow = new BrowserWindow({
+    width: 1380,
+    height: 920,
+    minWidth: 1080,
+    minHeight: 720,
+    backgroundColor: "#f6f2ea",
+    title: "Novayxk Browser Workspace",
+    icon: ICON_PATH,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: true,
+      additionalArguments: ["--novayxk-browser-window=1"],
+    },
+  });
+  browserWorkspaceWindow.setMenu(null);
+  browserWorkspaceWindow.maximize();
+  installBrowserSessionObservers();
+  browserWorkspaceReady = false;
+  void createBrowserTraceFile().catch((error) => {
+    logError("browser:trace:createFailed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  });
+  browserWorkspaceWindow.webContents.on("did-start-loading", () => {
+    browserWorkspaceReady = false;
+  });
+  loadRendererTarget(browserWorkspaceWindow, { browserWorkspace: true });
+  browserWorkspaceWindow.on("closed", () => {
+    browserWorkspaceWindow = null;
+    browserWorkspaceReady = false;
+    void deleteBrowserTraceFile();
+  });
+  return browserWorkspaceWindow;
+}
+
+function markBrowserWorkspaceReady() {
+  browserWorkspaceReady = true;
+  const resolvers = [...browserWorkspaceReadyResolvers];
+  browserWorkspaceReadyResolvers.clear();
+  for (const resolve of resolvers) {
+    resolve();
+  }
+}
+
+function waitForBrowserWorkspaceReady(targetWindow, timeoutMs = BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS) {
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return Promise.reject(new Error("浏览器工作区窗口不可用"));
+  }
+  if (browserWorkspaceReady) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("浏览器工作区窗口启动超时"));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      targetWindow.webContents.removeListener("did-fail-load", onFailed);
+      targetWindow.removeListener("closed", onClosed);
+      browserWorkspaceReadyResolvers.delete(onReady);
+    };
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const onFailed = (_event, _errorCode, errorDescription) => {
+      cleanup();
+      reject(new Error(errorDescription || "浏览器工作区窗口加载失败"));
+    };
+    const onClosed = () => {
+      cleanup();
+      reject(new Error("浏览器工作区窗口已关闭"));
+    };
+    browserWorkspaceReadyResolvers.add(onReady);
+    targetWindow.webContents.once("did-fail-load", onFailed);
+    targetWindow.once("closed", onClosed);
+  });
+}
+
 function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -295,6 +931,8 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
+    registerGeneratedImageProtocol();
+    registerProjectFileProtocol();
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
@@ -807,6 +1445,19 @@ ipcMain.handle("project:readFile", async (_event, relativePath) => {
   };
 });
 
+ipcMain.handle("project:getFileAsset", async (_event, relativePath) => {
+  const fullPath = assertProjectFile(relativePath);
+  const stat = await fs.stat(fullPath);
+  if (!stat.isFile()) throw new Error("当前选择的不是文件。");
+  return {
+    kind: "image",
+    path: relativePath,
+    url: buildProjectFileUrl(relativePath),
+    mimeType: getProjectFileMimeType(relativePath),
+    size: stat.size,
+  };
+});
+
 ipcMain.handle("project:saveFile", async (_event, request) => {
   const relativePath = request?.relativePath;
   const content = request?.content;
@@ -886,7 +1537,7 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
   const changedFiles = [];
   for (const operation of operations) {
     if (!operation || typeof operation !== "object") throw new Error("文件操作格式无效。");
-    if (operation.type !== "mkdir" && operation.type !== "write" && operation.type !== "delete") {
+    if (operation.type !== "mkdir" && operation.type !== "write" && operation.type !== "replace" && operation.type !== "delete") {
       throw new Error(`不支持的文件操作：${operation.type}`);
     }
     if (!operation.path || typeof operation.path !== "string") throw new Error("文件操作缺少 path。");
@@ -907,6 +1558,28 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
         }
         throw error;
       }
+      changedFiles.push(operation.path);
+      continue;
+    }
+
+    if (operation.type === "replace") {
+      if (typeof operation.search !== "string" || !operation.search) throw new Error(`替换操作缺少 search：${operation.path}`);
+      if (typeof operation.replace !== "string") throw new Error(`替换操作缺少 replace：${operation.path}`);
+      if (operation.search.length > 50_000 || operation.replace.length > 50_000) {
+        throw new Error(`替换内容过长：${operation.path}`);
+      }
+      const original = await fs.readFile(targetPath, "utf8").catch((error) => {
+        if (error.code === "ENOENT") throw new Error(`要替换的文件不存在：${operation.path}`);
+        throw error;
+      });
+      if (!original.includes(operation.search)) {
+        throw new Error(`未在文件中找到要替换的原文：${operation.path}`);
+      }
+      const nextContent =
+        operation.occurrence === "all"
+          ? original.split(operation.search).join(operation.replace)
+          : original.replace(operation.search, operation.replace);
+      await fs.writeFile(targetPath, nextContent, "utf8");
       changedFiles.push(operation.path);
       continue;
     }
@@ -936,6 +1609,8 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
       path: operation.path,
       overwrite: operation.overwrite === true,
       contentBytes: typeof operation.content === "string" ? Buffer.byteLength(operation.content, "utf8") : 0,
+      searchBytes: typeof operation.search === "string" ? Buffer.byteLength(operation.search, "utf8") : 0,
+      replaceBytes: typeof operation.replace === "string" ? Buffer.byteLength(operation.replace, "utf8") : 0,
     })),
     changedFiles,
   });
@@ -1134,6 +1809,18 @@ ipcMain.handle("ai:chat", async (_event, request) => {
 });
 
 ipcMain.handle("ai:testProvider", async (_event, provider) => {
+  if (provider?.apiMode === "imageGenerations") {
+    const models = await listProviderModels(provider);
+    const selectedModel = String(provider?.model || "").trim();
+    const modelNote = selectedModel && !models.includes(selectedModel)
+      ? `，但当前模型 ${selectedModel} 未出现在模型列表里`
+      : "";
+    return {
+      ok: true,
+      message: `图片接口连接成功：已读取 ${models.length} 个模型${modelNote}。`,
+    };
+  }
+
   const data = await requestChatCompletion(
     provider,
     [
@@ -1147,6 +1834,123 @@ ipcMain.handle("ai:testProvider", async (_event, provider) => {
   return {
     ok: true,
     message: content ? `连接成功：${content}` : "连接成功。",
+  };
+});
+
+ipcMain.handle("ai:generateImage", async (_event, request) => {
+  const provider = request?.provider;
+  const prompt = String(request?.prompt || "").trim();
+  const size = typeof request?.size === "string" ? request.size : "1024x1024";
+  const n = Number.isFinite(request?.n) ? request.n : 1;
+  const controller = new AbortController();
+  activeImageGenerationController = controller;
+  logBehavior("ai:image:request", {
+    providerName: provider?.name,
+    model: provider?.model,
+    prompt,
+    size,
+    n,
+  });
+  try {
+    const data = await requestImageGeneration(provider, prompt, {
+      size,
+      n,
+      timeoutMs: IMAGE_GENERATION_TIMEOUT_MS,
+      controller,
+      abortMessage: IMAGE_GENERATION_ABORT_MESSAGE,
+    });
+    const images = [];
+    for (const [index, item] of data.data.entries()) {
+      images.push(await saveGeneratedImageItem(item, prompt, index, { timeoutMs: IMAGE_GENERATION_TIMEOUT_MS }));
+    }
+    logBehavior("ai:image:result", {
+      providerName: provider?.name,
+      model: provider?.model,
+      imageCount: images.length,
+      imagePaths: images.map((image) => image.path),
+    });
+    return {
+      ok: true,
+      images,
+      message: `图片生成完成：${images.length} 张`,
+    };
+  } finally {
+    if (activeImageGenerationController === controller) {
+      activeImageGenerationController = null;
+    }
+  }
+});
+
+ipcMain.handle("ai:imageCancel", async () => {
+  if (!activeImageGenerationController) return { ok: false };
+  activeImageGenerationController.abort();
+  return { ok: true };
+});
+
+ipcMain.handle("ai:openGeneratedImage", async (_event, imagePath) => {
+  const targetPath = assertGeneratedImageFile(imagePath);
+  const result = await shell.openPath(targetPath);
+  if (result) throw new Error(result);
+  return { ok: true };
+});
+
+ipcMain.handle("ai:copyGeneratedImage", async (_event, imagePath) => {
+  const targetPath = assertGeneratedImageFile(imagePath);
+  let image = nativeImage.createFromPath(targetPath);
+  if (image.isEmpty()) {
+    image = nativeImage.createFromBuffer(await fs.readFile(targetPath));
+  }
+  if (image.isEmpty()) {
+    throw new Error("无法复制这张图片。");
+  }
+  clipboard.clear();
+  clipboard.write({
+    image,
+    text: targetPath,
+  });
+  clipboard.writeBuffer("PNG", image.toPNG());
+  return { ok: true };
+});
+
+ipcMain.handle("ai:saveGeneratedImageToProject", async (_event, request) => {
+  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  const sourcePath = assertGeneratedImageFile(request?.imagePath);
+  const requestedPath = sanitizeGeneratedImageFileName(request?.targetPath || "");
+  const relativePath = requestedPath
+    ? requestedPath
+    : await ensureUniqueProjectImagePath(buildDefaultGeneratedImageProjectPath(sourcePath));
+  if (requestedPath) {
+    const explicitTarget = assertProjectFile(relativePath);
+    try {
+      await fs.access(explicitTarget);
+      throw new Error(`目标文件已存在：${relativePath}`);
+    } catch (error) {
+      if (error?.message?.startsWith("目标文件已存在")) throw error;
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  const targetPath = assertProjectFile(relativePath);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.copyFile(sourcePath, targetPath);
+  logApp("ai:image:savedToProject", {
+    projectRoot: activeProjectRoot,
+    sourcePath,
+    targetPath,
+    relativePath,
+  });
+  return {
+    ok: true,
+    path: targetPath,
+    relativePath,
+  };
+});
+
+ipcMain.handle("ai:listProviderModels", async (_event, provider) => {
+  const models = await listProviderModels(provider);
+  return {
+    ok: true,
+    models,
+    message: `已读取 ${models.length} 个模型`,
   };
 });
 
@@ -1231,3 +2035,148 @@ ipcMain.handle("app:getPrivilege", async () => ({
 ipcMain.handle("app:restartAsAdmin", async () => ({
   ok: await restartAsAdmin(),
 }));
+
+ipcMain.handle("app:openBrowserWorkspaceWindow", async () => {
+  createBrowserWorkspaceWindow({ focus: true });
+  return { ok: true };
+});
+
+ipcMain.on("browser:workspaceReady", (event) => {
+  if (browserWorkspaceWindow && !browserWorkspaceWindow.isDestroyed() && event.sender === browserWorkspaceWindow.webContents) {
+    markBrowserWorkspaceReady();
+  }
+});
+
+ipcMain.on("browser:workspaceCommand", async (event, requestId, request) => {
+  const shouldFocusBrowser = request?.type !== "prompt-context" && request?.focus !== false;
+  const targetWindow = browserWorkspaceWindow && !browserWorkspaceWindow.isDestroyed()
+    ? createBrowserWorkspaceWindow({ focus: shouldFocusBrowser })
+    : shouldFocusBrowser
+      ? createBrowserWorkspaceWindow({ focus: true })
+      : null;
+  const replyToSender = (payload) => {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send("browser:workspaceCommand:reply", requestId, payload);
+    }
+  };
+
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    if (request?.type === "prompt-context") {
+      readBrowserTracePreview({ createIfMissing: browserActionLogs.length > 0 || browserNetworkLogs.length > 0 })
+        .then((trace) => {
+          replyToSender({
+            ok: true,
+            result: {
+              snapshot: serializeBrowserSnapshot(),
+              trace,
+            },
+          });
+        })
+        .catch((error) => {
+          replyToSender({
+            ok: false,
+            error: error instanceof Error ? error.message : "读取浏览器轨迹失败",
+          });
+        });
+      return;
+    }
+    replyToSender({
+      ok: false,
+      error: "浏览器工作区窗口不可用",
+    });
+    return;
+  }
+
+  const responseChannel = `browser:workspaceCommand:reply:${requestId}`;
+  let timeout = null;
+  const cleanup = () => {
+    if (timeout) clearTimeout(timeout);
+    ipcMain.removeAllListeners(responseChannel);
+  };
+
+  ipcMain.once(responseChannel, (_replyEvent, payload) => {
+    cleanup();
+    replyToSender(payload);
+  });
+
+  timeout = setTimeout(() => {
+    cleanup();
+    replyToSender({
+      ok: false,
+      error: "浏览器工作区命令执行超时",
+    });
+  }, BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS);
+
+  try {
+    await waitForBrowserWorkspaceReady(targetWindow);
+    if (targetWindow.isDestroyed()) {
+      throw new Error("浏览器工作区窗口已关闭");
+    }
+    targetWindow.webContents.send("browser:workspaceCommand:execute", requestId, request);
+  } catch (error) {
+    cleanup();
+    replyToSender({
+      ok: false,
+      error: error instanceof Error ? error.message : "浏览器工作区命令执行失败",
+    });
+  }
+});
+
+ipcMain.on("browser:workspaceCommand:reply", (_event, requestId, payload) => {
+  ipcMain.emit(`browser:workspaceCommand:reply:${requestId}`, null, payload);
+});
+
+ipcMain.handle("browser:getSnapshot", async () => serializeBrowserSnapshot());
+
+ipcMain.handle("browser:navigate", async (_event, request) => handleBrowserNavigate(request?.url));
+
+ipcMain.handle("browser:reload", async () => {
+  updateBrowserSnapshot({ isLoading: true });
+  emitBrowserPageEvent("did-start-loading");
+  return serializeBrowserSnapshot();
+});
+
+ipcMain.handle("browser:goBack", async () => {
+  return serializeBrowserSnapshot();
+});
+
+ipcMain.handle("browser:goForward", async () => {
+  return serializeBrowserSnapshot();
+});
+
+ipcMain.handle("browser:clearLogs", async () => {
+  browserActionLogs.length = 0;
+  browserNetworkLogs.length = 0;
+  browserRequestMeta.clear();
+  await createBrowserTraceFile();
+  return { ok: true };
+});
+
+ipcMain.handle("browser:getActionLog", async () => [...browserActionLogs]);
+
+ipcMain.handle("browser:getNetworkLog", async () => [...browserNetworkLogs]);
+
+ipcMain.handle("browser:getGuestPreloadUrl", async () => BROWSER_GUEST_PRELOAD_URL);
+
+ipcMain.handle("browser:getTrace", async () => readBrowserTracePreview({ createIfMissing: true }));
+
+ipcMain.on("browser:syncSnapshot", (_event, payload) => {
+  updateBrowserSnapshot(payload);
+});
+
+ipcMain.on("browser:pageEvent", (_event, type, snapshot) => {
+  if (snapshot && typeof snapshot === "object") {
+    updateBrowserSnapshot(snapshot);
+  }
+  emitBrowserPageEvent(type || "did-navigate");
+});
+
+ipcMain.on("browser:actionObserved", (_event, payload) => {
+  if (!payload || typeof payload !== "object") return;
+  pushBrowserActionLog(payload);
+});
+
+ipcMain.on("browser:networkObserved", (_event, payload) => {
+  if (!payload || typeof payload !== "object") return;
+  pushBrowserNetworkLog(payload);
+});

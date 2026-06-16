@@ -60,6 +60,36 @@ function stripInjectedContext(content) {
   return indexes.length ? text.slice(0, Math.min(...indexes)) : text;
 }
 
+function normalizeMessageAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments
+    .filter((attachment) => attachment?.type === "image" && attachment?.path && attachment?.url)
+    .slice(0, 8)
+    .map((attachment) => ({
+      type: "image",
+      path: String(attachment.path).slice(0, 2000),
+      url: String(attachment.url).slice(0, 2000),
+      mimeType: String(attachment.mimeType || "image/png").slice(0, 120),
+      ...(attachment.prompt ? { prompt: String(attachment.prompt).slice(0, 4000) } : {}),
+      ...(attachment.revisedPrompt ? { revisedPrompt: String(attachment.revisedPrompt).slice(0, 4000) } : {}),
+      ...(attachment.createdAt ? { createdAt: String(attachment.createdAt).slice(0, 80) } : {}),
+    }));
+}
+
+function normalizeTokenUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const promptTokens = Math.max(0, Math.round(Number(usage.promptTokens)));
+  const completionTokens = Math.max(0, Math.round(Number(usage.completionTokens)));
+  const totalTokens = Math.max(promptTokens + completionTokens, Math.round(Number(usage.totalTokens)));
+  if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) || !Number.isFinite(totalTokens)) return null;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    estimated: usage.estimated !== false,
+  };
+}
+
 async function ensureProjectMemoryRoot(projectRoot = activeProjectRoot) {
   const paths = getProjectMemoryPaths(projectRoot);
   await fs.mkdir(paths.tasksDir, { recursive: true });
@@ -147,15 +177,21 @@ async function saveTaskHistory(taskInput) {
 
   const messages = Array.isArray(taskInput.messages) ? taskInput.messages : existing.messages ?? [];
   if (messages.length > 300) throw new Error("任务消息太多，请新建一个任务继续。");
-  const normalizedMessages = messages.map((message) => ({
-    role: message.role,
-    content: (message.role === "user"
-      ? stripInjectedContext(message.content)
-      : String(message.content ?? "")).slice(0, 80_000),
-    ...(Number.isFinite(message.elapsedMs) && message.elapsedMs >= 0
-      ? { elapsedMs: Math.round(message.elapsedMs) }
-      : {}),
-  }));
+  const normalizedMessages = messages.map((message) => {
+    const attachments = normalizeMessageAttachments(message.attachments);
+    const tokenUsage = normalizeTokenUsage(message.tokenUsage);
+    return {
+      role: message.role,
+      content: (message.role === "user"
+        ? stripInjectedContext(message.content)
+        : String(message.content ?? "")).slice(0, 80_000),
+      ...(Number.isFinite(message.elapsedMs) && message.elapsedMs >= 0
+        ? { elapsedMs: Math.round(message.elapsedMs) }
+        : {}),
+      ...(tokenUsage ? { tokenUsage } : {}),
+      ...(attachments.length ? { attachments } : {}),
+    };
+  });
   const title = String(taskInput.title || existing.title || titleFromMessages(normalizedMessages)).slice(0, 80);
   const summary = String(taskInput.summary || summarizeMessages(normalizedMessages)).slice(0, 4000);
   const task = {

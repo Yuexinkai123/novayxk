@@ -1,6 +1,6 @@
 {
   "name": "novayxk",
-  "version": "0.6.3",
+  "version": "1.0.9",
   "private": true,
   "description": "Novayxk - a Windows local AI project workspace desktop app.",
   "main": "electron/main.cjs",

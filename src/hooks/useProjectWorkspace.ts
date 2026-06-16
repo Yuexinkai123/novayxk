@@ -1,5 +1,5 @@
 import React from "react";
-import type { FileNode, ProjectPayload } from "../vite-env";
+import type { FileNode, ProjectPayload, ProjectSelectedFile, ProjectTextFile } from "../vite-env";
 import type { CreateEntryDialogState } from "../components/dialogs/CreateEntryDialog";
 import { createDesktopBridgeUnavailableError, formatActionableError, getDesktopBridgeUnavailableMessage } from "../app/errors";
 import {
@@ -15,7 +15,34 @@ import {
   updateTreeNode,
 } from "../project/tree";
 
-type SelectedFile = { path: string; content: string } | null;
+const PREVIEWABLE_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"]);
+
+function getFileExtension(filePath: string) {
+  const normalized = String(filePath || "").toLowerCase();
+  const dotIndex = normalized.lastIndexOf(".");
+  return dotIndex >= 0 ? normalized.slice(dotIndex) : "";
+}
+
+function isPreviewableImageFile(filePath: string) {
+  return PREVIEWABLE_IMAGE_EXTENSIONS.has(getFileExtension(filePath));
+}
+
+async function loadProjectSelectedFile(relativePath: string): Promise<ProjectSelectedFile> {
+  if (!window.novayxk) {
+    throw createDesktopBridgeUnavailableError("读取文件");
+  }
+
+  if (isPreviewableImageFile(relativePath)) {
+    return window.novayxk.getProjectFileAsset(relativePath);
+  }
+
+  const file = await window.novayxk.readFile(relativePath);
+  return {
+    kind: "text",
+    path: file.path,
+    content: file.content,
+  };
+}
 
 type UseProjectWorkspaceOptions = {
   saveLastProjectRoot: (projectRoot: string | null) => Promise<void>;
@@ -27,7 +54,7 @@ export function useProjectWorkspace({
   setStatus,
 }: UseProjectWorkspaceOptions) {
   const [project, setProject] = React.useState<ProjectPayload | null>(null);
-  const [selectedFile, setSelectedFile] = React.useState<SelectedFile>(null);
+  const [selectedFile, setSelectedFile] = React.useState<ProjectSelectedFile | null>(null);
   const [activeTreePath, setActiveTreePath] = React.useState<string | null>(null);
   const [activeTreeNodeType, setActiveTreeNodeType] = React.useState<FileNode["type"] | null>(null);
   const [isEditorDirty, setIsEditorDirty] = React.useState(false);
@@ -139,7 +166,7 @@ export function useProjectWorkspace({
   );
 
   const saveSelectedFile = React.useCallback(async () => {
-    if (!selectedFile || !isEditorDirty) return true;
+    if (!selectedFile || selectedFile.kind !== "text" || !isEditorDirty) return true;
     if (!project) {
       setStatus("请先打开一个项目。");
       return false;
@@ -173,7 +200,7 @@ export function useProjectWorkspace({
       if (!candidatePath) return;
 
       try {
-        const file = await window.novayxk.readFile(candidatePath);
+        const file = await loadProjectSelectedFile(candidatePath);
         setSelectedFile(file);
         setActiveTreePath(candidatePath);
         setActiveTreeNodeType("file");
@@ -253,7 +280,12 @@ export function useProjectWorkspace({
       }
 
       if (!project) {
-        setSelectedFile({ path: node.path, content: "打开真实项目后，这里会显示文件内容。" });
+        const placeholder: ProjectTextFile = {
+          kind: "text",
+          path: node.path,
+          content: "打开真实项目后，这里会显示文件内容。",
+        };
+        setSelectedFile(placeholder);
         return;
       }
 
@@ -264,14 +296,14 @@ export function useProjectWorkspace({
 
       setStatus(`正在读取 ${node.path}`);
       try {
-        const file = await window.novayxk?.readFile(node.path);
+        const file = await loadProjectSelectedFile(node.path);
         if (file) {
           setSelectedFile(file);
           setActiveTreePath(file.path);
           setActiveTreeNodeType("file");
           revealTreePath(file.path);
           setIsEditorDirty(false);
-          setStatus(`已读取 ${file.path}`);
+          setStatus(file.kind === "image" ? `已打开图片：${file.path}` : `已读取 ${file.path}`);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "读取文件失败";

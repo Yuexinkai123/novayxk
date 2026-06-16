@@ -37,15 +37,6 @@ function distanceToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - x, py - y);
 }
 
-function inNShape(x, y, offsetX, offsetY, scale = 1) {
-  const px = (x - offsetX) / scale;
-  const py = (y - offsetY) / scale;
-  const left = px >= 0 && px <= 10 && py >= 0 && py <= 42;
-  const right = px >= 42 && px <= 52 && py >= 0 && py <= 42;
-  const diagonal = distanceToSegment(px, py, 8, 3, 44, 39) <= 6;
-  return left || right || diagonal;
-}
-
 function fillPixel(buffer, width, height, x, y, color) {
   const rowSize = Math.ceil((width * 3) / 4) * 4;
   const offset = 54 + (height - 1 - y) * rowSize + x * 3;
@@ -77,69 +68,95 @@ function writeBmp(filePath, width, height, sampler) {
   fs.writeFileSync(filePath, buffer);
 }
 
-function sidebarSampler(x, y, width, height) {
-  const base = mix(rgba(7, 14, 32), rgba(16, 33, 53), clamp((x * 0.28 + y) / height, 0, 1));
-  let color = mix(base, rgba(18, 63, 60), Math.max(0, (height * 0.42 - y) / height) * 0.28);
+function monogramAt(x, y, offsetX, offsetY, scale = 1) {
+  const px = (x - offsetX) / scale;
+  const py = (y - offsetY) / scale;
+  const left = roundedRect(px, py, 0, 0, 10, 42, 5);
+  const right = roundedRect(px, py, 42, 0, 10, 42, 5);
+  const diagonal = distanceToSegment(px, py, 8, 6, 44, 36) <= 5.5;
+  return left || right || diagonal;
+}
 
-  const glowA = Math.max(0, 1 - Math.hypot(x - 36, y - 52) / 108);
-  const glowB = Math.max(0, 1 - Math.hypot(x - 142, y - 268) / 134);
-  color = mix(color, rgba(77, 142, 255), glowA * 0.2);
-  color = mix(color, rgba(78, 222, 163), glowB * 0.14);
+function sidebarSamplerFactory(accentColor) {
+  return (x, y, width, height) => {
+    const t = clamp((y * 0.86 + x * 0.18) / height, 0, 1);
+    let color = mix(rgba(12, 17, 23), rgba(22, 30, 39), t);
 
-  if (x >= 0 && x < width && y >= 0 && y < height) {
-    const grain = ((x * 17 + y * 31) % 19) / 19;
-    color = mix(color, rgba(255, 255, 255), grain * 0.025);
-  }
+    const glowA = Math.max(0, 1 - Math.hypot(x - 46, y - 44) / 126);
+    const glowB = Math.max(0, 1 - Math.hypot(x - 138, y - 278) / 136);
+    color = mix(color, rgba(accentColor.r, accentColor.g, accentColor.b), glowA * 0.12);
+    color = mix(color, rgba(255, 255, 255), glowB * 0.03);
 
-  if (roundedRect(x, y, 28, 30, 108, 108, 24)) {
-    color = mix(color, rgba(218, 226, 253), 0.08);
-  }
+    if (roundedRect(x, y, 24, 28, 116, 116, 24)) {
+      color = mix(color, rgba(255, 255, 255), 0.035);
+    }
 
-  if (roundedRect(x, y, 36, 38, 92, 92, 20)) {
-    color = mix(rgba(16, 33, 53), rgba(35, 95, 145), clamp((x + y) / 190, 0, 1));
-  }
+    if (roundedRect(x, y, 38, 42, 88, 88, 18)) {
+      color = mix(color, rgba(255, 255, 255), 0.04);
+    }
 
-  if (inNShape(x, y, 56, 63, 1)) color = rgba(255, 253, 248);
-  const spark = Math.abs(x - 107) / 10 + Math.abs(y - 61) / 10 <= 1;
-  if (spark) color = rgba(78, 222, 163);
+    if (monogramAt(x, y, 56, 62, 1)) {
+      color = rgba(244, 247, 251);
+    }
 
-  if (roundedRect(x, y, 26, 172, 112, 52, 8)) color = mix(color, rgba(218, 226, 253), 0.08);
-  if (x > 40 && x < 116 && y > 188 && y < 191) color = rgba(173, 198, 255);
-  if (x > 40 && x < 130 && y > 202 && y < 204) color = rgba(140, 144, 159);
-  if (x > 40 && x < 94 && y > 212 && y < 214) color = rgba(78, 222, 163);
+    if ((x - 108) ** 2 + (y - 62) ** 2 <= 9 ** 2) {
+      color = rgba(accentColor.r, accentColor.g, accentColor.b);
+    }
 
-  if (x > 30 && x < 134 && y > 254 && y < 257) color = rgba(173, 198, 255);
-  if (x > 50 && x < 114 && y > 264 && y < 266) color = rgba(78, 222, 163);
+    if (distanceToSegment(x, y, 42, 188, 118, 188) <= 1.8) {
+      color = rgba(163, 183, 212);
+    }
 
-  return color;
+    if (distanceToSegment(x, y, 42, 206, 102, 206) <= 1.2) {
+      color = rgba(accentColor.r, accentColor.g, accentColor.b);
+    }
+
+    if (distanceToSegment(x, y, 42, 258, 132, 258) <= 1.8) {
+      color = rgba(244, 247, 251, 224);
+    }
+
+    if (distanceToSegment(x, y, 56, 270, 112, 270) <= 1.1) {
+      color = rgba(accentColor.r, accentColor.g, accentColor.b);
+    }
+
+    return color;
+  };
 }
 
 function headerSampler(x, y, width, height) {
-  let color = mix(rgba(11, 19, 38), rgba(19, 27, 46), clamp(x / width, 0, 1));
-  const glow = Math.max(0, 1 - Math.hypot(x - 142, y - 4) / 116);
-  color = mix(color, rgba(77, 142, 255), glow * 0.16);
-  if (y > height - 2) color = rgba(66, 71, 84);
+  let color = mix(rgba(15, 21, 28), rgba(24, 33, 44), clamp(x / width, 0, 1));
+  const glow = Math.max(0, 1 - Math.hypot(x - 26, y - 6) / 92);
+  color = mix(color, rgba(111, 143, 189), glow * 0.18);
 
-  const markX = x - 18;
-  const markY = y - 10;
-  if (roundedRect(markX, markY, 0, 0, 40, 40, 9)) {
-    color = mix(rgba(18, 63, 60), rgba(35, 95, 145), clamp((markX + markY) / 76, 0, 1));
+  if (y >= height - 1.5) {
+    return rgba(52, 66, 84);
   }
-  const left = markX >= 12 && markX <= 16 && markY >= 13 && markY <= 29;
-  const right = markX >= 25 && markX <= 29 && markY >= 13 && markY <= 29;
-  const diagonal = distanceToSegment(markX, markY, 15, 14, 26, 28) <= 3;
-  if (left || right || diagonal) color = rgba(255, 253, 248);
 
-  const lineA = x > 74 && x < 156 && y > 17 && y < 20;
-  const lineB = x > 74 && x < 236 && y > 32 && y < 34;
-  if (lineA) color = rgba(173, 198, 255);
-  if (lineB) color = rgba(78, 222, 163);
+  if (roundedRect(x, y, 16, 9, 40, 40, 10)) {
+    color = mix(rgba(18, 24, 31), rgba(31, 42, 55), clamp((x + y) / 72, 0, 1));
+  }
+
+  if (monogramAt(x, y, 28, 19, 0.72)) {
+    color = rgba(244, 247, 251);
+  }
+
+  if ((x - 47) ** 2 + (y - 18) ** 2 <= 4.6 ** 2) {
+    color = rgba(210, 178, 130);
+  }
+
+  if (distanceToSegment(x, y, 74, 18, 152, 18) <= 1.5) {
+    color = rgba(163, 183, 212);
+  }
+
+  if (distanceToSegment(x, y, 74, 31, 226, 31) <= 1.2) {
+    color = rgba(111, 143, 189);
+  }
 
   return color;
 }
 
 fs.mkdirSync(installerDir, { recursive: true });
-writeBmp(path.join(installerDir, "installerSidebar.bmp"), 164, 314, sidebarSampler);
-writeBmp(path.join(installerDir, "uninstallerSidebar.bmp"), 164, 314, sidebarSampler);
+writeBmp(path.join(installerDir, "installerSidebar.bmp"), 164, 314, sidebarSamplerFactory(rgba(111, 143, 189)));
+writeBmp(path.join(installerDir, "uninstallerSidebar.bmp"), 164, 314, sidebarSamplerFactory(rgba(171, 130, 82)));
 writeBmp(path.join(installerDir, "installerHeader.bmp"), 150, 57, headerSampler);
 console.log(`Generated NSIS installer artwork in ${installerDir}`);

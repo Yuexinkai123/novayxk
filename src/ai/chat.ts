@@ -1,4 +1,5 @@
-import type { AiControlMode, ChatMessage, FileOperation, ProjectContext, TaskSummary } from "../vite-env";
+import type { AiControlMode, AssistantMode, ChatMessage, FileOperation, ProjectContext, TaskSummary } from "../vite-env";
+import { isBrowserAutomationAction, type BrowserAutomationAction } from "../browser/actions";
 import { formatBytes } from "../project/tree";
 
 export const STREAM_ABORT_MESSAGE = "用户已停止本次生成。";
@@ -10,11 +11,90 @@ export type RuntimePermissionContext = {
   privilegeLabel: string;
 };
 
-export function buildSystemPrompt(projectMemory: string, taskSummary: string, runtimePermission: RuntimePermissionContext) {
+export type AssistantModeProfile = {
+  mode: AssistantMode;
+  memoryLimit: number;
+  taskSummaryLimit: number;
+  selectedFileLimit: number;
+  historyLimitWithContext?: number;
+  historyLimitWithoutContext: number;
+  continuationHistoryLimit: number;
+  commandSummaryHistoryLimit: number;
+  projectFileListLimit: number;
+  projectRelatedFileLimit?: number;
+  projectRelatedContentLimit: number;
+};
+
+const ASSISTANT_MODE_PROFILES: Record<AssistantMode, AssistantModeProfile> = {
+  low: {
+    mode: "low",
+    memoryLimit: 2200,
+    taskSummaryLimit: 1200,
+    selectedFileLimit: 7000,
+    historyLimitWithContext: 6,
+    historyLimitWithoutContext: 5,
+    continuationHistoryLimit: 6,
+    commandSummaryHistoryLimit: 10,
+    projectFileListLimit: 90,
+    projectRelatedFileLimit: 4,
+    projectRelatedContentLimit: 5000,
+  },
+  standard: {
+    mode: "standard",
+    memoryLimit: 6000,
+    taskSummaryLimit: 3000,
+    selectedFileLimit: 12000,
+    historyLimitWithoutContext: 6,
+    continuationHistoryLimit: 8,
+    commandSummaryHistoryLimit: 20,
+    projectFileListLimit: 180,
+    projectRelatedContentLimit: 8000,
+  },
+  deep: {
+    mode: "deep",
+    memoryLimit: 10000,
+    taskSummaryLimit: 5000,
+    selectedFileLimit: 20000,
+    historyLimitWithoutContext: 14,
+    continuationHistoryLimit: 12,
+    commandSummaryHistoryLimit: 30,
+    projectFileListLimit: 260,
+    projectRelatedFileLimit: 8,
+    projectRelatedContentLimit: 12000,
+  },
+};
+
+export function normalizeAssistantMode(value: unknown): AssistantMode {
+  if (value === "low" || value === "deep") return value;
+  return "standard";
+}
+
+export function getAssistantModeProfile(mode: AssistantMode = "standard") {
+  return ASSISTANT_MODE_PROFILES[normalizeAssistantMode(mode)];
+}
+
+function getAssistantModeSystemInstruction(mode: AssistantMode) {
+  if (mode === "low") {
+    return "当前助手模式：极省模式。低 token 不等于低质量；目标仍然是解决问题。用尽量少的上下文和字数完成任务；先给结论，只保留必要步骤；上下文不足时，主动用最小必要检查补齐或向用户要一个关键缺口，不能因为模式省 token 就放弃、猜测或糊弄。除非用户明确要求或完成任务必须，不要展开背景、方案枚举、长解释或额外检查。执行过文件、命令、浏览器或图片动作后，默认只做最低成本复查。";
+  }
+  if (mode === "deep") {
+    return "当前助手模式：深度模式。可以保留更多上下文，适合复杂排查、重构和多步骤任务；回答时说明关键依据、风险和验证结果，但仍避免无关铺陈。执行过文件、命令、浏览器或图片动作后，要补完整复查链路。";
+  }
+  return "当前助手模式：标准模式。在上下文、速度和完整度之间保持平衡；目标仍然是完整解决用户问题。回答具体可执行，解释保持适中；发现上下文不够时，先补最相关的信息，再给结论。执行过文件、命令、浏览器或图片动作后，要补关键结果复查。";
+}
+
+export function buildSystemPrompt(
+  projectMemory: string,
+  taskSummary: string,
+  runtimePermission: RuntimePermissionContext,
+  assistantMode: AssistantMode = "standard",
+) {
+  const profile = getAssistantModeProfile(assistantMode);
+  const normalizedAssistantMode = profile.mode;
   const memoryBlock = projectMemory.trim()
-    ? `\n\n【项目长期记忆】\n${projectMemory.trim().slice(0, 6000)}`
+    ? `\n\n【项目长期记忆】\n${projectMemory.trim().slice(0, profile.memoryLimit)}`
     : "";
-  const taskBlock = taskSummary.trim() ? `\n\n【当前任务摘要】\n${taskSummary.trim().slice(0, 3000)}` : "";
+  const taskBlock = taskSummary.trim() ? `\n\n【当前任务摘要】\n${taskSummary.trim().slice(0, profile.taskSummaryLimit)}` : "";
   const windowsPrivilegeBlock = runtimePermission.isAdmin
     ? "当前 Novayxk Windows 进程权限：管理员权限。你可以明确告诉用户当前应用已经以管理员身份运行。"
     : `当前 Novayxk Windows 进程权限：${runtimePermission.privilegeLabel}。用户要求切换“管理员模式”“系统级权限”“管理员权限”时，通常指设置里的管理员模式按钮：Novayxk 可以请求 Windows UAC 并以管理员权限重启；不要回答成只能让用户手动右键打开。不要把 Windows 进程权限和 Novayxk 内部执行范围混为一谈。`;
@@ -24,8 +104,31 @@ export function buildSystemPrompt(projectMemory: string, taskSummary: string, ru
       : "当前 Novayxk 内部 AI 执行范围：项目内执行。用户要求切换“系统级执行”“AI 执行范围”“内部执行模式”时，才理解为内部执行范围切换；用户只说“管理员模式”时优先理解为 Windows UAC 管理员权限请求。你可以通过 ```powershell-run 代码块请求执行项目目录内的常见开发命令，例如 npm run build、npm test、dir、Get-ChildItem、git status。不要把删除、重置、格式化、系统设置、下载后直接执行脚本等高风险命令放进自动执行块。";
   const logBlock =
     "\nNovayxk 自身日志位于 %USERPROFILE%\\.novayxk\\logs\\，包括 app.log、error.log、ai.log、behavior.log。behavior.log 是临时的完整行为日志，会记录更详细的 IPC、模型流、命令、终端和用户介入行为。用户问 Novayxk 自己的报错、日志、为什么没执行命令时，你可以用 powershell-run 只读命令读取这些日志尾部，例如 Get-Content \"$env:USERPROFILE\\.novayxk\\logs\\error.log\" -Tail 120，或 Get-Content \"$env:USERPROFILE\\.novayxk\\logs\\behavior.log\" -Tail 200。";
-  const shellBlock = `\n\n${windowsPrivilegeBlock}\n${controlModeBlock}${logBlock}`;
-  const behaviorBlock = `你是 Novayxk，一款谨慎但自然的通用本机执行与项目协作助手。你不只是编程助手：可以帮助用户处理代码项目、Windows 环境、软件安装与卸载、应用配置、文件处理、联网资料核验、命令执行和日常电脑操作。回答要具体、可执行，也要像正常对话一样根据用户当下的话轻重回应。
+  const imageBlock =
+    "\n对话中的已生成图片附件会保存在 %USERPROFILE%\\.novayxk\\generated-images\\。用户要求把最近生成的图片保存到当前项目目录时，不要说 Novayxk 没有落盘能力。";
+  const shellBlock = `\n\n${windowsPrivilegeBlock}\n${controlModeBlock}${logBlock}${imageBlock}`;
+  if (normalizedAssistantMode === "low") {
+    const compactBehaviorBlock = `${getAssistantModeSystemInstruction(normalizedAssistantMode)}
+
+你是 Novayxk，一款谨慎但自然的本机执行与项目协作助手。不要把自己说成只能写代码；能通过本机命令、fileops、browser-actions 或 Windows UAC 推进的任务，就在安全边界内推进。
+
+知识解释、寒暄和简单问答直接短答，不主动调用工具。用户明确要求查看本机、联网核实、安装卸载、运行命令、改文件或操作网页时，才输出自动执行代码块。
+
+极省模式只减少冗余上下文和冗长表达，不减少你可用的问题解决能力。遇到复杂任务时，优先选择最小可行步骤推进；如果必须更多上下文才能避免误改或误判，明确补一次最关键的上下文，而不是给不可靠答案。
+
+复杂任务可以先给 2 到 4 条极简计划，但计划后必须立刻继续执行、总结或给结论；不要只停在计划、引子或“我先看一下”。
+
+用户要求查看、梳理、总结当前项目时，如果上下文里已经包含项目摘要、文件清单或相关文件内容，就直接给项目总结，不要只回复“我先看一下/我先扫一眼/稍后总结”这类准备动作。
+
+文件创建/修改优先用严格 JSON 的 \`\`\`fileops\`\`\`；浏览器操作用严格 JSON 的 \`\`\`browser-actions\`\`\`；PowerShell 命令必须放在单独的 \`\`\`powershell-run\`\`\`。不要要求用户手动复制执行，输出这些代码块后等待 Novayxk 返回结果再总结。输出 powershell-run 后不要在同一条回复里追加“检查结果/执行结果/结论/已安装/版本/路径”等内容，因为此时命令还没有真实执行。
+
+避免敏感凭据泄露，不代填密码、验证码、支付或外部授权。高风险、删除、系统设置和受保护目录操作要谨慎说明目的。`;
+    return `${compactBehaviorBlock}${shellBlock}${memoryBlock}${taskBlock}`;
+  }
+
+  const behaviorBlock = `${getAssistantModeSystemInstruction(normalizedAssistantMode)}
+
+你是 Novayxk，一款谨慎但自然的通用本机执行与项目协作助手。你不只是编程助手：可以帮助用户处理代码项目、Windows 环境、软件安装与卸载、应用配置、文件处理、联网资料核验、命令执行和日常电脑操作。回答要具体、可执行，也要像正常对话一样根据用户当下的话轻重回应。
 
 不要仅因为任务不是编程就拒绝。不要说“我是编程助手，只能处理代码”“我没有联网搜索能力”“我不能安装软件”这类与 Novayxk 实际能力不一致的话。只要任务能通过 fileops、powershell-run、Windows UAC 授权或安全的本机命令完成，就主动推进；如果真实受限，要说清楚具体限制和可行替代方案。
 
@@ -33,13 +136,21 @@ export function buildSystemPrompt(projectMemory: string, taskSummary: string, ru
 
 用户要求安装、卸载或升级软件时，优先用 winget、choco、scoop、msiexec 或 Windows 自带工具处理。先搜索候选包，例如 winget search 软件名；能确认包 ID 后再安装或卸载，例如 winget install --id 包ID --accept-package-agreements --accept-source-agreements。需要管理员权限时，Novayxk 会请求 Windows UAC 授权，不要让用户自己去官网下载安装，除非包管理器没有可用结果或官方站点是唯一合理来源。如果下载或安装已经尝试多次仍失败，不要无限重复同一类命令；应查找官方下载页、网页版下载页或 Microsoft Store 网页地址，并通过 powershell-run 执行 Start-Process "https://..." 直接为用户打开下载页面，再根据命令结果说明已经打开或为什么打不开。
 
-解释概念、定义、原理、区别、用途这类知识型问题时，先直接回答，不要为了“顺手帮忙”主动输出 powershell-run、fileops 或其他会触发自动执行的内容。只有当用户明确要求你安装、运行、执行、打开、搜索、检查、查看本机状态、联网核实或代为操作时，才输出这些自动执行代码块。
+解释概念、定义、原理、区别、用途这类知识型问题时，先直接回答，不要为了“顺手帮忙”主动输出 powershell-run、fileops、browser-actions 或其他会触发自动执行的内容。只有当用户明确要求你安装、运行、执行、打开、搜索、检查、查看本机状态、联网核实或代为操作时，才输出这些自动执行代码块。
 
 用户只是打招呼、寒暄、测试在线状态或说很短的闲聊内容时，只简短自然回应，不要主动介绍项目、不要复述文件清单、不要列功能菜单。只有用户明确要求分析项目、查看文件、修改代码、解释项目内容或询问项目情况时，才使用文件清单和相关文件上下文。用户只是询问版本、环境、终端命令或运行状态时，不要介绍项目文件；如果需要命令，直接请求执行命令即可。隐藏上下文只用于帮助你判断，不要主动复述项目路径、文件清单或“我看到你的项目”。
 
-用户要求你创建页面、组件、脚本、样式或其他新文件时，优先直接返回一个或多个 \`\`\`fileops JSON 代码块，Novayxk 会自动执行项目内文件操作。fileops 格式为 [{"type":"mkdir","path":"相对目录"},{"type":"write","path":"相对文件","content":"文件内容","overwrite":false},{"type":"delete","path":"相对路径"}]。当用户明确要求新建、覆盖整个文件、删除文件或删除目录时，优先用 fileops，不要只给说明文字。生成完整前端应用、后台系统或大页面时，不要把所有 HTML/CSS/JS 塞进一个超大的单文件字符串；要拆成多个项目文件或多个 fileops 代码块，例如 package.json、src/main.js、src/App.vue、src/styles.css，每个 write 尽量保持在 12000 字符以内。修改已有文件的小范围局部内容时，优先给出文件路径、修改理由和 diff 风格补丁；只有用户明确要求覆盖已有文件时，fileops write 才可以设置 overwrite:true。
+用户要求查看、梳理、总结当前项目时，如果上下文里已经包含项目摘要、文件清单或相关文件内容，就直接给项目总结，不要只回复“我先看一下/我先扫一眼/稍后总结”这类准备动作。
 
-需要运行 PowerShell 命令时，必须返回一个完整的、单独成块的 \`\`\`powershell-run 代码块，每个代码块只放一条或一组相关命令；项目相关命令会在当前项目根目录执行，软件安装、系统查询、打开网页/商店、联网检索和 Novayxk 日志读取等系统任务会在用户目录执行，即使当前没有打开项目也可以尝试。不要输出 <tool_call>、<function=shell>、<parameter=command> 这类 XML 工具调用格式，Novayxk 不使用这种协议。不要把要执行的命令放在普通文字、行内代码或普通 \`\`\`text 代码块里。你输出 powershell-run 后，Novayxk 会自动执行并把结果再交给你总结，所以不要要求用户手动执行命令、复制输出或“执行后发我”，也不要在收到执行结果前说“已开始安装”“等安装结果返回”。fileops 路径必须是当前项目内的相对路径；PowerShell 命令默认在当前项目根目录执行，但用户明确要求系统、软件、网页或日志任务时，可以访问任务所需的项目外路径、网络地址或 Novayxk 自身日志。不要要求用户泄露密钥。`;
+用户要求你创建页面、组件、脚本、样式或其他新文件时，优先直接返回一个或多个 \`\`\`fileops JSON 代码块，Novayxk 会自动执行项目内文件操作。fileops 格式为 [{"type":"mkdir","path":"相对目录"},{"type":"write","path":"相对文件","content":"文件内容","overwrite":false},{"type":"replace","path":"相对文件","search":"原文","replace":"新文","occurrence":"first"},{"type":"delete","path":"相对路径"}]。当用户明确要求新建、覆盖整个文件、删除文件或删除目录时，优先用 fileops，不要只给说明文字。生成完整前端应用、后台系统或大页面时，不要把所有 HTML/CSS/JS 塞进一个超大的单文件字符串；要拆成多个项目文件或多个 fileops 代码块，例如 package.json、src/main.js、src/App.vue、src/styles.css，每个 write 尽量保持在 12000 字符以内。修改已有文件的小范围局部内容时，优先使用 fileops replace 做精确替换，例如把某一行 session 改成 access_token；不要为了改一行而用 PowerShell Set-Content 或整文件 overwrite。只有用户明确要求覆盖已有文件时，fileops write 才可以设置 overwrite:true。
+
+当任务涉及当前内嵌浏览器页面的自动操作时，使用单独的 \`\`\`browser-actions JSON 代码块。格式为 [{"type":"navigate","url":"https://example.com"},{"type":"click","selector":"button[type=submit]"},{"type":"type","selector":"input[name=email]","text":"user@example.com"},{"type":"waitFor","selector":".result","timeoutMs":5000},{"type":"pressKey","key":"Enter","selector":"input[name=q]"},{"type":"scrollTo","selector":"#result"},{"type":"select","selector":"select[name=city]","value":"shanghai"},{"type":"extractText","selector":".result-title","multiple":true},{"type":"runScript","script":"document.title"}]。必须输出严格 JSON，不要写注释，不要夹杂说明文字在代码块里。优先使用稳定的 CSS 选择器；只有确实需要执行页面内脚本时才使用 runScript。页面有多个“继续/登录”类按钮时，避免只用 button:has-text("继续") 这类宽泛选择器，优先用 button[type=submit]、data-testid、name、id 或和输入框相邻的具体选择器。遇到密码、验证码、二次验证、支付或外部授权确认步骤时，不要代填敏感内容，提示用户在浏览器里手动完成。
+
+浏览器轨迹只能用来分析用户自己的页面流程和 API 形状。用户明确要求生成登录/签到/自动化脚本时，可以写调用登录接口、读取响应字段、读取本脚本请求会话 Cookie、设置后续接口请求头的代码；如果需要修改文件，优先输出 fileops，不要让用户手动改。不要主动窃取或外传用户没有要求的第三方凭据，也不要把未执行的写入说成已经执行。只有当执行结果明确出现“已拦截/已阻止/暂停自动执行/high risk/安全策略”等字样时，才可以说被安全策略拦截；普通 Python 报错（例如 KeyError、字段不存在、超时、401、404）严禁归因成 fileops 被拦截。
+
+当上下文包含“浏览器 API 证据包”时，它是生成网站脚本的最高优先级证据。必须按证据包里的真实请求顺序、method、URL、header 名称、request body 和 response 字段写脚本；不要被旧聊天历史里的 token/session/access_token 猜测带偏。证据包缺少关键登录或签到请求时，先用 browser-actions 打开页面、点击用户指定按钮或提取页面状态继续观察；不要凭空猜接口字段。生成脚本后必须用 powershell-run 运行验证，失败时根据真实输出修复，不能说“可能被安全策略拦截”除非输出明确写了拦截。
+
+需要运行 PowerShell 命令时，必须返回一个完整的、单独成块的 \`\`\`powershell-run 代码块，每个代码块只放一条或一组相关命令；项目相关命令会在当前项目根目录执行，软件安装、系统查询、打开网页/商店、联网检索和 Novayxk 日志读取等系统任务会在用户目录执行，即使当前没有打开项目也可以尝试。不要输出 <tool_call>、<function=shell>、<parameter=command> 这类 XML 工具调用格式，Novayxk 不使用这种协议。不要把要执行的命令放在普通文字、行内代码或普通 \`\`\`text 代码块里。你输出 powershell-run、fileops 或 browser-actions 后，Novayxk 会自动执行并把结果再交给你总结，所以不要要求用户手动执行命令、复制输出或“执行后发我”，也不要在收到执行结果前说“已开始安装”“等安装结果返回”。尤其不要在 powershell-run 代码块后直接编造“检查结果/执行结果/结论/已安装/版本/路径”等内容；这些只能基于 Novayxk 返回的真实执行结果。fileops 路径必须是当前项目内的相对路径；PowerShell 命令默认在当前项目根目录执行，但用户明确要求系统、软件、网页或日志任务时，可以访问任务所需的项目外路径、网络地址或 Novayxk 自身日志。不要要求用户泄露密钥。`;
   return `${behaviorBlock}${shellBlock}${memoryBlock}${taskBlock}`;
 }
 
@@ -96,6 +207,25 @@ export function detectInternalControlModeRequest(prompt: string): AiControlMode 
   return null;
 }
 
+export function detectAssistantModeRequest(prompt: string): AssistantMode | null {
+  const normalized = prompt.trim().replace(/\s+/g, "").toLowerCase();
+  if (!normalized) return null;
+  if (!/(?:切换|切到|换成|改成|改为|设置为|设为|打开|开启|启用|进入|调到|变成|使用|用)/i.test(normalized)) {
+    return null;
+  }
+  if (
+    !/(?:助手模式|ai模式|token模式|低token|省token|极省|低消耗|低消耗模式|标准模式|默认模式|普通模式|深度模式|深度协作|low|standard|normal|deep)/i.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+  if (/(?:极省|低token|省token|低消耗|节省token|low)/i.test(normalized)) return "low";
+  if (/(?:深度|深度协作|仔细模式|复杂模式|deep)/i.test(normalized)) return "deep";
+  if (/(?:标准|默认|普通|standard|normal)/i.test(normalized)) return "standard";
+  return null;
+}
+
 export function getProjectContextMode(prompt: string): ProjectContextMode {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) return "none";
@@ -115,14 +245,31 @@ export function getProjectContextMode(prompt: string): ProjectContextMode {
   return "runtime";
 }
 
-export function buildModelChatHistory(messages: ChatMessage[], latestContext: string) {
-  const cleanMessages = sanitizeChatHistory(messages);
-  if (!latestContext.trim() && cleanMessages.length > 0) {
-    return cleanMessages.slice(-6).filter((message) => !looksLikeProjectContextReply(message.content));
+export function buildModelChatHistory(
+  messages: ChatMessage[],
+  latestContext: string,
+  assistantMode: AssistantMode = "standard",
+) {
+  const profile = getAssistantModeProfile(assistantMode);
+  const cleanMessages = sanitizeChatHistory(messages).map((message) => ({
+    role: message.role,
+    content: message.content,
+  }));
+  if (/浏览器 API 证据包/.test(latestContext)) {
+    const lastUserMessage = cleanMessages.filter((message) => message.role === "user").at(-1);
+    return lastUserMessage
+      ? [{ ...lastUserMessage, content: `${stripInjectedContext(lastUserMessage.content)}${latestContext}` }]
+      : [];
   }
-  if (!latestContext.trim() || cleanMessages.length === 0) return cleanMessages;
-  const lastIndex = cleanMessages.length - 1;
-  return cleanMessages.map((message, index) => {
+  const hasLatestContext = latestContext.trim().length > 0;
+  const historyLimit = hasLatestContext ? profile.historyLimitWithContext : profile.historyLimitWithoutContext;
+  const scopedMessages = typeof historyLimit === "number" ? cleanMessages.slice(-historyLimit) : cleanMessages;
+  if (!hasLatestContext && scopedMessages.length > 0) {
+    return scopedMessages.filter((message) => !looksLikeProjectContextReply(message.content));
+  }
+  if (!hasLatestContext || scopedMessages.length === 0) return scopedMessages;
+  const lastIndex = scopedMessages.length - 1;
+  return scopedMessages.map((message, index) => {
     if (index !== lastIndex || message.role !== "user") return message;
     return {
       ...message,
@@ -150,11 +297,50 @@ export function stripInjectedContext(content: string) {
 export function sanitizeChatHistory(messages: ChatMessage[]) {
   return messages
     .filter((message) => !isAbortPlaceholderMessage(message))
-    .map((message) => (
-      message.role === "user"
-        ? { ...message, content: stripInjectedContext(message.content).trim() }
-        : message
-    ));
+    .map((message) => {
+      const attachments = sanitizeChatAttachments(message.attachments);
+      const elapsedMs = message.elapsedMs;
+      const tokenUsage = sanitizeTokenUsage(message.tokenUsage);
+      const normalized = {
+        role: message.role,
+        content: message.role === "user"
+          ? stripInjectedContext(message.content).trim()
+          : String(message.content ?? ""),
+        ...(typeof elapsedMs === "number" && Number.isFinite(elapsedMs) && elapsedMs >= 0 ? { elapsedMs } : {}),
+        ...(tokenUsage ? { tokenUsage } : {}),
+      };
+      return attachments.length ? { ...normalized, attachments } : normalized;
+    });
+}
+
+function sanitizeTokenUsage(usage: ChatMessage["tokenUsage"]) {
+  if (!usage || typeof usage !== "object") return null;
+  const promptTokens = Math.max(0, Math.round(Number(usage.promptTokens)));
+  const completionTokens = Math.max(0, Math.round(Number(usage.completionTokens)));
+  const totalTokens = Math.max(promptTokens + completionTokens, Math.round(Number(usage.totalTokens)));
+  if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) || !Number.isFinite(totalTokens)) return null;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    estimated: usage.estimated !== false,
+  };
+}
+
+function sanitizeChatAttachments(attachments: ChatMessage["attachments"]) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments
+    .filter((attachment) => attachment?.type === "image" && attachment.url && attachment.path)
+    .slice(0, 8)
+    .map((attachment) => ({
+      type: "image" as const,
+      path: String(attachment.path).slice(0, 2000),
+      url: String(attachment.url).slice(0, 2000),
+      mimeType: String(attachment.mimeType || "image/png").slice(0, 120),
+      ...(attachment.prompt ? { prompt: String(attachment.prompt).slice(0, 4000) } : {}),
+      ...(attachment.revisedPrompt ? { revisedPrompt: String(attachment.revisedPrompt).slice(0, 4000) } : {}),
+      ...(attachment.createdAt ? { createdAt: String(attachment.createdAt).slice(0, 80) } : {}),
+    }));
 }
 
 export function isAbortPlaceholderMessage(message: ChatMessage) {
@@ -191,6 +377,29 @@ export function normalizeAssistantToolCallContent(content: string) {
   normalized = normalized.replace(/<tool_call\b[\s\S]*$/i, "正在整理命令请求...");
   normalized = normalized.replace(/<function=[\s\S]*$/i, "正在整理命令请求...");
   return normalized.trim();
+}
+
+export function stripPrematurePowerShellResultText(content: string) {
+  const blockPattern = /```(?:powershell-run|ps-run|shell-run)\n[\s\S]*?```/gi;
+  let lastMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = blockPattern.exec(content))) {
+    lastMatch = match;
+  }
+  if (!lastMatch) return content;
+
+  const trailingStart = (lastMatch.index ?? 0) + lastMatch[0].length;
+  const trailing = content.slice(trailingStart).trim();
+  if (!trailing) return content;
+  if (/^```/.test(trailing)) return content;
+
+  const looksLikePrematureResult =
+    /(?:检查结果|执行结果|命令结果|结果如下|结论|已安装|未安装|没有安装|找到了|没找到|版本[:：]|路径[:：]|退出码[:：]|成功|失败|完成|可以直接用|✅|❌)/i.test(
+      trailing,
+    );
+  if (!looksLikePrematureResult) return content;
+
+  return content.slice(0, trailingStart).trim();
 }
 
 export function decodeToolCallText(value: string) {
@@ -282,19 +491,54 @@ export function extractPowerShellCommands(content: string) {
   return commands;
 }
 
+const FILE_OP_TYPE_PATTERN = /"type"\s*:\s*"(?:mkdir|write|replace|delete)"/i;
+const FILE_OP_PATH_PATTERN = /"path"\s*:\s*"/i;
+
 export function extractFileOps(content: string): FileOperation[] {
   const blocks = [...content.matchAll(/```(?:fileops|json)\n([\s\S]*?)```/gi)];
+  const fencedOperations = blocks.flatMap((block) => {
+    if (!isLikelyFileOpsBlock(block[0], block[1])) return [];
+    return parseFileOpsCandidate(block[1]);
+  });
+  if (fencedOperations.length) return fencedOperations;
+
+  return collectBareFileOpsCandidates(content).flatMap((candidate) => parseFileOpsCandidate(candidate));
+}
+
+export function extractBrowserActions(content: string): BrowserAutomationAction[] {
+  const blocks = [...content.matchAll(/```(?:browser-actions|json)\n([\s\S]*?)```/gi)];
   if (!blocks.length) return [];
 
   return blocks.flatMap((block) => {
+    if (!isLikelyBrowserActionsBlock(block[0], block[1])) return [];
     try {
       const parsed = JSON.parse(block[1]);
-      const operations = Array.isArray(parsed) ? parsed : [parsed];
-      return operations.filter(isFileOperation);
+      return normalizeBrowserActionsPayload(parsed);
     } catch {
       return [];
     }
   });
+}
+
+export function getBrowserActionsParseIssue(content: string) {
+  const hasOpenFence =
+    /```browser-actions\n/i.test(content) ||
+    /```json\n[\s\S]*?"(?:type|action)"\s*:\s*"(?:navigate|click|type|waitFor|pressKey|scrollTo|select|extractText|runScript)"/i.test(content);
+  if (!hasOpenFence) return "";
+
+  const closedBlocks = [...content.matchAll(/```(?:browser-actions|json)\n([\s\S]*?)```/gi)].filter((block) =>
+    isLikelyBrowserActionsBlock(block[0], block[1]),
+  );
+  if (!closedBlocks.length) return "代码块没有正常闭合，通常是输出在中途停止。";
+
+  const hadActionLikeBlock = closedBlocks.some((block) =>
+    /"(?:type|action)"\s*:\s*"(?:navigate|click|type|waitFor|pressKey|scrollTo|select|extractText|runScript)"/i.test(block[1]),
+  );
+  if (!hadActionLikeBlock) return "";
+
+  const parsedActions = extractBrowserActions(content);
+  if (!parsedActions.length) return "代码块存在，但 JSON 不是合法的 browser-actions 格式。";
+  return "";
 }
 
 export function hasDestructiveFileOps(operations: FileOperation[]) {
@@ -303,18 +547,98 @@ export function hasDestructiveFileOps(operations: FileOperation[]) {
 
 export function getFileOpsParseIssue(content: string) {
   const hasOpenFileOpsFence = /```fileops\n/i.test(content);
-  const hasOpenJsonFileOpsFence = /```json\n[\s\S]*(?:"type"\s*:|"path"\s*:)/i.test(content);
-  if (!hasOpenFileOpsFence && !hasOpenJsonFileOpsFence) return "";
+  const hasOpenJsonFileOpsFence = /```json\n[\s\S]*?"type"\s*:\s*"(?:mkdir|write|replace|delete)"/i.test(content);
+  const looksLikeBareFileOps = looksLikeFileOpsJson(content);
+  if (!hasOpenFileOpsFence && !hasOpenJsonFileOpsFence && !looksLikeBareFileOps) return "";
 
-  const closedBlocks = [...content.matchAll(/```(?:fileops|json)\n([\s\S]*?)```/gi)];
-  if (!closedBlocks.length) return "代码块没有正常闭合，通常是输出在中途停止。";
+  const closedBlocks = [...content.matchAll(/```(?:fileops|json)\n([\s\S]*?)```/gi)].filter((block) =>
+    isLikelyFileOpsBlock(block[0], block[1]),
+  );
+  const bareCandidates = collectBareFileOpsCandidates(content);
+  if (!closedBlocks.length && !bareCandidates.length) {
+    return hasOpenFileOpsFence || hasOpenJsonFileOpsFence
+      ? "代码块没有正常闭合，通常是输出在中途停止。"
+      : "检测到疑似裸 JSON fileops，但结构不完整，通常是输出在中途停止。";
+  }
 
-  const hadFileOpsLikeBlock = closedBlocks.some((block) => /"type"\s*:|"path"\s*:|"content"\s*:/i.test(block[1]));
+  const hadFileOpsLikeBlock = closedBlocks.some((block) => FILE_OP_TYPE_PATTERN.test(block[1])) || bareCandidates.length > 0;
   if (!hadFileOpsLikeBlock) return "";
 
   const parsedOperations = extractFileOps(content);
-  if (!parsedOperations.length) return "代码块存在，但 JSON 不是合法的 fileops 格式。";
+  if (!parsedOperations.length) {
+    return hasOpenFileOpsFence || hasOpenJsonFileOpsFence
+      ? "代码块存在，但 JSON 不是合法的 fileops 格式。"
+      : "检测到疑似裸 JSON fileops，但 JSON 不是合法的 fileops 格式。";
+  }
   return "";
+}
+
+function isAbsoluteLikePath(value: string) {
+  return /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(value.trim());
+}
+
+export function getAutomationRecoveryIssue(content: string) {
+  const fileOps = extractFileOps(content);
+  if (fileOps.length) {
+    const outsideProjectPath = fileOps.find((operation) => isAbsoluteLikePath(operation.path));
+    if (outsideProjectPath) {
+      return "fileops 里包含绝对路径或项目外路径。fileops 只支持当前项目内的相对路径；桌面、下载、文档这类路径必须改用 powershell-run。";
+    }
+  }
+
+  const fileOpsParseIssue = getFileOpsParseIssue(content);
+  if (fileOpsParseIssue) {
+    return `fileops 代码块有问题：${fileOpsParseIssue}`;
+  }
+
+  const looksLikeLegacyFileCreate =
+    /"(?:operation|action)"\s*:\s*"(?:create|write|replace|delete|mkdir)"/i.test(content) &&
+    /"path"\s*:\s*"/i.test(content) &&
+    (/"content"\s*:\s*"/i.test(content) || /"search"\s*:\s*"/i.test(content));
+  if (looksLikeLegacyFileCreate) {
+    return "检测到旧版或伪 fileops JSON。Novayxk 不支持 { operation/create/path/content } 这种格式，必须改成合法的 fileops 数组，或改成 powershell-run。";
+  }
+
+  return "";
+}
+
+function isLikelyFileOpsBlock(fenceSource: string, blockContent: string) {
+  if (/^```fileops\b/i.test(fenceSource)) return true;
+  return looksLikeFileOpsJson(blockContent);
+}
+
+function isLikelyBrowserActionsBlock(fenceSource: string, blockContent: string) {
+  if (/^```browser-actions\b/i.test(fenceSource)) return true;
+  return /"(?:type|action)"\s*:\s*"(?:navigate|click|type|waitFor|pressKey|scrollTo|select|extractText|runScript)"/i.test(blockContent);
+}
+
+function normalizeBrowserActionsPayload(payload: unknown): BrowserAutomationAction[] {
+  const candidates =
+    Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === "object" && Array.isArray((payload as { actions?: unknown[] }).actions)
+        ? (payload as { actions: unknown[] }).actions
+        : [payload];
+
+  return candidates.flatMap((candidate) => {
+    const normalized = normalizeBrowserAction(candidate);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function normalizeBrowserAction(value: unknown): BrowserAutomationAction | null {
+  if (!value || typeof value !== "object") return null;
+  if (isBrowserAutomationAction(value)) return value;
+
+  const actionLike = value as Record<string, unknown>;
+  if (typeof actionLike.action !== "string") return null;
+
+  const { action, ...rest } = actionLike;
+  const normalized = {
+    ...rest,
+    type: action,
+  };
+  return isBrowserAutomationAction(normalized) ? normalized : null;
 }
 
 export function isFileOperation(value: unknown): value is FileOperation {
@@ -330,7 +654,102 @@ export function isFileOperation(value: unknown): value is FileOperation {
       (operation.overwrite === undefined || typeof operation.overwrite === "boolean")
     );
   }
+  if (operation.type === "replace") {
+    return (
+      typeof operation.path === "string" &&
+      operation.path.length > 0 &&
+      typeof operation.search === "string" &&
+      operation.search.length > 0 &&
+      typeof operation.replace === "string" &&
+      (operation.occurrence === undefined || operation.occurrence === "first" || operation.occurrence === "all")
+    );
+  }
   return false;
+}
+
+function parseFileOpsCandidate(candidate: string): FileOperation[] {
+  try {
+    const parsed = JSON.parse(candidate);
+    const operations = Array.isArray(parsed) ? parsed : [parsed];
+    return operations.filter(isFileOperation);
+  } catch {
+    return [];
+  }
+}
+
+function looksLikeFileOpsJson(content: string) {
+  return FILE_OP_TYPE_PATTERN.test(content) && FILE_OP_PATH_PATTERN.test(content);
+}
+
+function collectBareFileOpsCandidates(content: string) {
+  return collectTopLevelJsonCandidates(content).filter((candidate) => looksLikeFileOpsJson(candidate));
+}
+
+function collectTopLevelJsonCandidates(content: string) {
+  const candidates: string[] = [];
+  let startIndex = -1;
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+
+    if (startIndex === -1) {
+      if (char === "{") {
+        startIndex = index;
+        stack.push("}");
+      } else if (char === "[") {
+        startIndex = index;
+        stack.push("]");
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      stack.push("}");
+      continue;
+    }
+    if (char === "[") {
+      stack.push("]");
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      if (!stack.length || stack[stack.length - 1] !== char) {
+        startIndex = -1;
+        stack.length = 0;
+        inString = false;
+        escaped = false;
+        continue;
+      }
+      stack.pop();
+      if (!stack.length) {
+        candidates.push(content.slice(startIndex, index + 1));
+        startIndex = -1;
+      }
+    }
+  }
+
+  return candidates;
 }
 
 export function formatFileOps(operations: FileOperation[]) {
@@ -339,23 +758,28 @@ export function formatFileOps(operations: FileOperation[]) {
     .map((operation) => {
       if (operation.type === "mkdir") return `mkdir ${operation.path}`;
       if (operation.type === "delete") return `delete ${operation.path}`;
+      if (operation.type === "replace") return `replace ${operation.path}\n${operation.search.slice(0, 500)} -> ${operation.replace.slice(0, 500)}`;
       return `${operation.overwrite ? "overwrite" : "write"} ${operation.path}\n${operation.content.slice(0, 1000)}`;
     })
     .join("\n\n");
 }
 
-export function formatProjectContext(context: ProjectContext) {
+export function formatProjectContext(context: ProjectContext, assistantMode: AssistantMode = "standard") {
+  const profile = getAssistantModeProfile(assistantMode);
   const visibleFiles = context.files.filter((file) => !file.sensitive);
   const fileList = visibleFiles
-    .slice(0, 180)
+    .slice(0, profile.projectFileListLimit)
     .map((file) => `- ${file.path} (${formatBytes(file.size)})`)
     .join("\n");
-  const relatedBlocks = context.relatedFiles
+  const relatedFiles = typeof profile.projectRelatedFileLimit === "number"
+    ? context.relatedFiles.slice(0, profile.projectRelatedFileLimit)
+    : context.relatedFiles;
+  const relatedBlocks = relatedFiles
     .map(
       (file) =>
-        `\n\n相关文件：${file.path}${file.truncated ? "（已截断）" : ""}\n\`\`\`\n${file.content.slice(0, 8000)}\n\`\`\``,
+        `\n\n相关文件：${file.path}${file.truncated ? "（已截断）" : ""}\n\`\`\`\n${file.content.slice(0, profile.projectRelatedContentLimit)}\n\`\`\``,
     )
     .join("");
 
-  return `\n\n项目上下文摘要：${context.root}\n文件清单（节选 ${Math.min(visibleFiles.length, 180)}/${visibleFiles.length}）：\n${fileList || "- 无可读文件"}${relatedBlocks}`;
+  return `\n\n项目上下文摘要：${context.root}\n文件清单（节选 ${Math.min(visibleFiles.length, profile.projectFileListLimit)}/${visibleFiles.length}）：\n${fileList || "- 无可读文件"}${relatedBlocks}`;
 }

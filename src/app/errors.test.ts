@@ -19,6 +19,13 @@ describe("formatActionableError", () => {
     expect(message).toContain("Base URL");
   });
 
+  it("keeps image generation timeout errors explicit", () => {
+    const message = formatActionableError(new Error("图片生成超时，请检查 Base URL、网络或供应商状态。"), "图片生成失败");
+
+    expect(message).toContain("图片生成超时");
+    expect(message).not.toContain("网络连接没有成功");
+  });
+
   it("turns cancelled UAC prompts into a clear next step", () => {
     const message = formatActionableError(
       new Error("管理员模式没有启动，因为 Windows UAC 授权被取消了。请重新点击“管理员模式”，并在弹窗里选择“是”。"),

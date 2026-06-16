@@ -8,21 +8,54 @@ function getDefaultConfig() {
     lastProjectRoot: null,
     theme: "dark",
     aiControlMode: "safe",
+    assistantMode: "standard",
+    browserShowAdvancedControls: false,
     hasSeenWelcome: false,
     hasSeenWorkspaceGuide: false,
     pendingAdminResume: null,
+    workspaceLayout: {},
   };
+}
+
+function normalizeWorkspaceLayout(value) {
+  if (!value || typeof value !== "object") return {};
+  const normalized = {};
+  if (Number.isFinite(value.leftPanelWidth)) normalized.leftPanelWidth = Math.max(0, Math.round(value.leftPanelWidth));
+  if (Number.isFinite(value.rightPanelWidth)) normalized.rightPanelWidth = Math.max(0, Math.round(value.rightPanelWidth));
+  if (Number.isFinite(value.bottomPanelHeight)) normalized.bottomPanelHeight = Math.max(0, Math.round(value.bottomPanelHeight));
+  if (typeof value.isLeftCollapsed === "boolean") normalized.isLeftCollapsed = value.isLeftCollapsed;
+  if (typeof value.isRightCollapsed === "boolean") normalized.isRightCollapsed = value.isRightCollapsed;
+  if (typeof value.isBottomCollapsed === "boolean") normalized.isBottomCollapsed = value.isBottomCollapsed;
+  return normalized;
+}
+
+function normalizeApiMode(value) {
+  if (value === "responses" || value === "imageGenerations") return value;
+  return "chatCompletions";
+}
+
+function normalizeAssistantMode(value) {
+  if (value === "low" || value === "deep") return value;
+  return "standard";
+}
+
+function isLikelyImageModelName(model) {
+  return /(?:^|[\W_])(?:gpt-image|dall-e|image-generation|imagen|flux|sdxl|stable-diffusion|stable_image)(?:$|[\W_])/i.test(
+    String(model || "").trim(),
+  );
 }
 
 function normalizeProvider(provider, index, safeStorage) {
   const apiKey = decodeStoredApiKey(provider, safeStorage);
+  const model = String(provider?.model || "");
+  const apiMode = normalizeApiMode(provider?.apiMode);
   return {
     id: String(provider?.id || `provider-${index + 1}`),
     name: String(provider?.name || `供应商 ${index + 1}`),
     baseUrl: String(provider?.baseUrl || ""),
     apiKey,
-    model: String(provider?.model || ""),
-    apiMode: provider?.apiMode === "responses" ? "responses" : "chatCompletions",
+    model,
+    apiMode: apiMode === "chatCompletions" && isLikelyImageModelName(model) ? "imageGenerations" : apiMode,
   };
 }
 
@@ -38,9 +71,12 @@ function normalizeConfig(rawConfig, safeStorage) {
     lastProjectRoot: typeof rawConfig?.lastProjectRoot === "string" ? rawConfig.lastProjectRoot : fallback.lastProjectRoot,
     theme: rawConfig?.theme === "light" ? "light" : fallback.theme,
     aiControlMode: rawConfig?.aiControlMode === "full" ? "full" : fallback.aiControlMode,
+    assistantMode: normalizeAssistantMode(rawConfig?.assistantMode),
+    browserShowAdvancedControls: rawConfig?.browserShowAdvancedControls === true,
     hasSeenWelcome: rawConfig?.hasSeenWelcome === true,
     hasSeenWorkspaceGuide: rawConfig?.hasSeenWorkspaceGuide === true,
     pendingAdminResume: normalizePendingAdminResume(rawConfig?.pendingAdminResume),
+    workspaceLayout: normalizeWorkspaceLayout(rawConfig?.workspaceLayout),
   };
 }
 
@@ -123,9 +159,12 @@ function buildDiskConfig(config, safeStorage) {
     lastProjectRoot: normalized.lastProjectRoot,
     theme: normalized.theme,
     aiControlMode: normalized.aiControlMode,
+    assistantMode: normalized.assistantMode,
+    browserShowAdvancedControls: normalized.browserShowAdvancedControls,
     hasSeenWelcome: normalized.hasSeenWelcome,
     hasSeenWorkspaceGuide: normalized.hasSeenWorkspaceGuide,
     pendingAdminResume: normalized.pendingAdminResume,
+    workspaceLayout: normalized.workspaceLayout,
   };
 }
 
@@ -201,10 +240,21 @@ function createConfigService({ configDir, configFile, logApp, safeStorage }) {
       activeProviderId: diskConfig?.activeProviderId || null,
       theme: diskConfig?.theme || null,
       aiControlMode: diskConfig?.aiControlMode || null,
+      assistantMode: diskConfig?.assistantMode || null,
+      browserShowAdvancedControls: diskConfig?.browserShowAdvancedControls === true,
       hasLastProjectRoot: Boolean(diskConfig?.lastProjectRoot),
       hasSeenWelcome: diskConfig?.hasSeenWelcome === true,
       hasSeenWorkspaceGuide: diskConfig?.hasSeenWorkspaceGuide === true,
       hasPendingAdminResume: Boolean(diskConfig?.pendingAdminResume?.command),
+      hasWorkspaceLayout: Boolean(
+        diskConfig?.workspaceLayout &&
+          (diskConfig.workspaceLayout.leftPanelWidth ||
+            diskConfig.workspaceLayout.rightPanelWidth ||
+            diskConfig.workspaceLayout.bottomPanelHeight ||
+            diskConfig.workspaceLayout.isLeftCollapsed ||
+            diskConfig.workspaceLayout.isRightCollapsed ||
+            diskConfig.workspaceLayout.isBottomCollapsed),
+      ),
       encryptedProviderCount: Array.isArray(diskConfig?.providers)
         ? diskConfig.providers.filter((provider) => provider.apiKeyStorage === "safeStorage").length
         : 0,

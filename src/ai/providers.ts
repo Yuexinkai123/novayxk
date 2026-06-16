@@ -1,4 +1,4 @@
-import type { AiControlMode, ProviderConfig, ThemeMode } from "../vite-env";
+import type { AiControlMode, AssistantMode, ProviderConfig, ThemeMode } from "../vite-env";
 
 export const defaultProvider: ProviderConfig = {
   id: "provider-openai-compatible",
@@ -21,6 +21,31 @@ export function isThemeMode(value: unknown): value is ThemeMode {
 
 export function isAiControlMode(value: unknown): value is AiControlMode {
   return value === "safe" || value === "full";
+}
+
+export function isAssistantMode(value: unknown): value is AssistantMode {
+  return value === "low" || value === "standard" || value === "deep";
+}
+
+export function isImageGenerationMode(apiMode: ProviderConfig["apiMode"]) {
+  return apiMode === "imageGenerations";
+}
+
+export function isLikelyImageModel(model: string) {
+  return /(?:^|[\W_])(?:gpt-image|dall-e|image-generation|imagen|flux|sdxl|stable-diffusion|stable_image)(?:$|[\W_])/i.test(
+    model.trim(),
+  );
+}
+
+export function inferProviderApiMode(model: string): NonNullable<ProviderConfig["apiMode"]> {
+  if (isLikelyImageModel(model)) return "imageGenerations";
+  return "chatCompletions";
+}
+
+export function getProviderModeLabel(apiMode: ProviderConfig["apiMode"]) {
+  if (apiMode === "responses") return "Responses";
+  if (apiMode === "imageGenerations") return "图片生成";
+  return "聊天";
 }
 
 export function formatElapsedSeconds(elapsedMs: number) {

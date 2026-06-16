@@ -5,7 +5,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronRight,
-  FileCode2,
   Folder,
   FolderOpen,
   LockKeyhole,
@@ -20,9 +19,15 @@ import {
 import novayxkLogo from "../../assets/icons/novayxk-64.png";
 import type {
   AiControlMode,
+  AssistantMode,
+  BrowserAutomationResult,
+  BrowserSnapshot,
+  BrowserTraceSnapshot,
   ChatMessage,
   TerminalTask,
 } from "../vite-env";
+import type { BrowserAutomationAction } from "../browser/actions";
+import { formatBrowserPromptContext } from "../browser/context";
 import { TerminalPanel } from "./terminal/TerminalPanel";
 import { ConfirmDialog, type ConfirmDialogState } from "./dialogs/ConfirmDialog";
 import { CreateEntryDialog } from "./dialogs/CreateEntryDialog";
@@ -30,6 +35,7 @@ import { MemoryModal } from "./settings/MemoryModal";
 import { SettingsModal } from "./settings/SettingsModal";
 import { ProjectSidebar } from "./sidebar/ProjectSidebar";
 import { EditorPane } from "./editor/EditorPane";
+import { BrowserWorkspace } from "./browser/BrowserWorkspace";
 import { AssistantPanel } from "./assistant/AssistantPanel";
 import { WelcomeGuide } from "./onboarding/WelcomeGuide";
 import { useTerminalTasks } from "../hooks/useTerminalTasks";
@@ -39,8 +45,10 @@ import { useProviderSettings } from "../hooks/useProviderSettings";
 import { useProjectWorkspace } from "../hooks/useProjectWorkspace";
 import { useAiAssistant } from "../hooks/useAiAssistant";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions";
+import { useBrowserWorkspace } from "../hooks/useBrowserWorkspace";
 import { hasAnyConfiguredProvider } from "../ai/providers";
 import {
+  getAssistantModeStatus,
   getExecutionModeLabel,
   getExecutionModeTitle,
   getPrivilegeChipLabel,
@@ -57,6 +65,7 @@ import { countTextMatches, getEditorStats, handleCodeEditorKeyDown } from "../ho
 
 const emptyMessages: ChatMessage[] = [];
 type AdminRequestState = "ready" | "restarting" | "cancelled";
+const isBrowserWorkspaceWindow = new URLSearchParams(window.location.search).get("novayxk-browser-window") === "1";
 
 function App() {
   const initialConfig = window.novayxk?.initialConfig ?? {};
@@ -72,17 +81,7 @@ function App() {
   const [loadingElapsedMs, setLoadingElapsedMs] = React.useState(0);
   const [status, setStatus] = React.useState("打开一个项目，开始和 Novayxk 协作。");
   const [assistantPromptFocusNonce, setAssistantPromptFocusNonce] = React.useState(0);
-  const {
-    isLeftCollapsed,
-    setIsLeftCollapsed,
-    isRightCollapsed,
-    setIsRightCollapsed,
-    isBottomCollapsed,
-    setIsBottomCollapsed,
-    workspaceStyle,
-    editorStyle,
-    startPanelResize,
-  } = useWorkspaceLayout();
+  const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
   const [editorFind, setEditorFind] = React.useState("");
   const [isWordWrapEnabled, setIsWordWrapEnabled] = React.useState(false);
   const [isWelcomeOpen, setIsWelcomeOpen] = React.useState(
@@ -104,10 +103,15 @@ function App() {
     setEditingProviderId,
     providerTestStatus,
     isTestingProvider,
+    providerModelOptions,
+    providerModelStatus,
+    isLoadingProviderModels,
     aiControlMode,
+    assistantMode,
     privilege,
     isRestartingAsAdmin,
     theme,
+    browserShowAdvancedControls,
     activeProvider,
     editingProvider,
     hasSeenWelcome,
@@ -119,6 +123,8 @@ function App() {
     switchActiveProvider,
     updateTheme,
     updateAiControlMode,
+    updateAssistantMode,
+    updateBrowserShowAdvancedControls,
     refreshPrivilegeState,
     restartAsAdmin,
     clearPendingAdminResume,
@@ -127,9 +133,34 @@ function App() {
     addProvider,
     removeActiveProvider,
     testActiveProvider,
+    loadProviderModels,
   } = useProviderSettings({
     initialConfig,
     setStatus,
+  });
+  const persistWorkspaceLayout = React.useCallback(
+    (workspaceLayout: NonNullable<typeof initialConfig.workspaceLayout>) => {
+      void saveAppConfig({ workspaceLayout }).catch(() => {
+        // Keep layout changes local even if persistence fails.
+      });
+    },
+    [initialConfig.workspaceLayout, saveAppConfig],
+  );
+  const {
+    isLeftCollapsed,
+    setIsLeftCollapsed,
+    isRightCollapsed,
+    setIsRightCollapsed,
+    isBottomCollapsed,
+    setIsBottomCollapsed,
+    isSidebarVisible,
+    isCenterVisible,
+    workspaceStyle,
+    editorStyle,
+    startPanelResize,
+  } = useWorkspaceLayout({
+    initialLayout: initialConfig.workspaceLayout,
+    onLayoutChange: persistWorkspaceLayout,
   });
 
   const runtimePermissionContext = React.useMemo(
@@ -139,6 +170,13 @@ function App() {
       privilegeLabel: privilege?.isAdmin ? "Windows 管理员权限" : privilege ? "Windows 普通权限" : "未知权限",
     }),
     [aiControlMode, privilege],
+  );
+  const switchAssistantMode = React.useCallback(
+    async (nextMode: AssistantMode) => {
+      const saved = await updateAssistantMode(nextMode);
+      setStatus(saved ? getAssistantModeStatus(nextMode) : "助手模式已切换，但保存偏好失败");
+    },
+    [setStatus, updateAssistantMode],
   );
   const hasConfiguredProvider = React.useMemo(() => hasAnyConfiguredProvider(providers), [providers]);
 
@@ -173,6 +211,7 @@ function App() {
     saveLastProjectRoot,
     setStatus,
   });
+  const selectedTextFile = selectedFile?.kind === "text" ? selectedFile : null;
 
   const handleProjectMemorySaved = React.useCallback(() => {
     setIsMemoryOpen(false);
@@ -200,10 +239,10 @@ function App() {
     onMemorySaved: handleProjectMemorySaved,
   });
 
-  const selectedFileStats = React.useMemo(() => getEditorStats(selectedFile?.content ?? ""), [selectedFile?.content]);
+  const selectedFileStats = React.useMemo(() => getEditorStats(selectedTextFile?.content ?? ""), [selectedTextFile?.content]);
   const editorFindMatches = React.useMemo(
-    () => countTextMatches(selectedFile?.content ?? "", editorFind),
-    [editorFind, selectedFile?.content],
+    () => countTextMatches(selectedTextFile?.content ?? "", editorFind),
+    [editorFind, selectedTextFile?.content],
   );
   const workspaceGuideKind = React.useMemo(
     () =>
@@ -385,20 +424,12 @@ function App() {
   }, []);
 
   const {
-    terminalCommand,
-    setTerminalCommand,
-    terminalInput,
-    setTerminalInput,
     terminalTasks,
     activeTerminalTask,
     runningTerminalTaskCount,
     setActiveTerminalTaskId,
     upsertTerminalTask,
-    startTerminalTask,
-    stopActiveTerminalTask,
-    restartActiveTerminalTask,
     copyTerminalOutput,
-    sendTerminalInput,
   } = useTerminalTasks({
     aiControlMode,
     privilege,
@@ -409,6 +440,92 @@ function App() {
     confirmSystemAction,
     onTaskNeedsInput: handleTerminalTaskNeedsInput,
   });
+  const {
+    webviewRef,
+    browserUrlInput,
+    setBrowserUrlInput,
+    browserSnapshot,
+    browserActionLog,
+    browserNetworkLog,
+    browserTraceSnapshot,
+    browserGuestPreloadUrl,
+    browserScriptInput,
+    setBrowserScriptInput,
+    browserActionSelector,
+    setBrowserActionSelector,
+    browserActionText,
+    setBrowserActionText,
+    browserActionTimeoutMs,
+    setBrowserActionTimeoutMs,
+    lastBrowserAutomationResult,
+    setLastBrowserAutomationResult,
+    browserPromptSnapshot,
+    browserCommand,
+    browserCommandNonce,
+    browserTargetUrl,
+    navigateBrowser,
+    runBrowserCommand,
+    runBrowserAutomation,
+    getBrowserPromptContext,
+    clearBrowserLogs,
+  } = useBrowserWorkspace({
+    setStatus,
+  });
+
+  const runBrowserAutomationViaWorkspaceWindow = React.useCallback(
+    async (action: BrowserAutomationAction, focus = true) => {
+      const result = await window.novayxk?.browserRunInWorkspaceWindow({
+        type: "automation",
+        action,
+        focus,
+      });
+      return result as BrowserAutomationResult;
+    },
+    [],
+  );
+
+  const getBrowserPromptContextViaWorkspaceWindow = React.useCallback(async () => {
+    const result = await window.novayxk?.browserRunInWorkspaceWindow({
+      type: "prompt-context",
+    });
+    if (result && typeof result === "object" && "snapshot" in result) {
+      const fallback = result as { snapshot: BrowserSnapshot; trace?: BrowserTraceSnapshot };
+      return formatBrowserPromptContext({
+        snapshot: fallback.snapshot,
+        page: null,
+        actions: browserActionLog,
+        network: browserNetworkLog,
+        trace: fallback.trace ?? null,
+      });
+    }
+    return String(result || "");
+  }, [browserActionLog, browserNetworkLog]);
+
+  const shouldFocusBrowserForAutomation = React.useCallback((action: BrowserAutomationAction) => {
+    if (action.type === "extractText") return false;
+    if (action.type === "runScript") {
+      return !/^(?:document\.location\.href|location\.href|document\.title|document\.body\.innerText|document\.body\.textContent)$/i.test(action.script.trim());
+    }
+    return true;
+  }, []);
+
+  const navigateBrowserViaWorkspaceWindow = React.useCallback(async () => {
+    const nextUrl = browserUrlInput;
+    await window.novayxk?.browserRunInWorkspaceWindow({
+      type: "navigate",
+      url: nextUrl,
+    });
+  }, [browserUrlInput]);
+
+  const runBrowserCommandViaWorkspaceWindow = React.useCallback(
+    async (command: "reload" | "back" | "forward") => {
+      await window.novayxk?.browserRunInWorkspaceWindow({
+        type: "command",
+        command,
+      });
+    },
+    [],
+  );
   const { sendMessage, stopGeneration, resumePendingAdminCommand } = useAiAssistant({
     prompt,
     setPrompt,
@@ -429,14 +546,33 @@ function App() {
     activeTaskSummary,
     runtimePermissionContext,
     aiControlMode,
+    assistantMode,
     privilege,
+    openBrowserWorkspace: () => {
+      void openBrowserWorkspaceWindow();
+    },
+    getBrowserPromptContext: isBrowserWorkspaceWindow ? getBrowserPromptContext : getBrowserPromptContextViaWorkspaceWindow,
+    executeBrowserAutomation: async (actions: BrowserAutomationAction[]) => {
+      const results: BrowserAutomationResult[] = [];
+      for (const action of actions) {
+        const result = isBrowserWorkspaceWindow
+          ? await runBrowserAutomation(action)
+          : await runBrowserAutomationViaWorkspaceWindow(action, shouldFocusBrowserForAutomation(action));
+        results.push(result);
+        if (!result.ok) break;
+      }
+      return results;
+    },
     updateAiControlMode,
+    updateAssistantMode,
     activeTerminalTask,
     terminalTasks,
     setActiveTerminalTaskId,
     upsertTerminalTask,
     showBottomPanel: () => setIsBottomCollapsed(false),
     activeTaskId,
+    editingMessageIndex,
+    setEditingMessageIndex,
     prepareAdminCommandResume,
     clearPendingAdminResume,
     requestAdminForCommandIfNeeded,
@@ -483,6 +619,15 @@ function App() {
     syncProjectView,
   });
 
+  const openBrowserWorkspaceWindow = React.useCallback(async () => {
+    try {
+      await window.novayxk?.openBrowserWorkspaceWindow();
+      setStatus("已打开浏览器工作区窗口");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "打开浏览器工作区窗口失败");
+    }
+  }, []);
+
   React.useEffect(() => {
     if (!pendingAdminResume) {
       pendingResumeLoadRef.current = null;
@@ -514,75 +659,143 @@ function App() {
     resumePendingAdminCommand,
   ]);
 
+  if (isBrowserWorkspaceWindow) {
+    return (
+      <main className="app-shell browser-window-shell" data-theme={theme}>
+        <section className="browser-window-panel">
+          <div className="center-panel-tabs browser-window-tabs">
+            <button className="active">
+              <Folder size={15} />
+              浏览器工作区
+            </button>
+          </div>
+          <BrowserWorkspace
+            webviewRef={webviewRef}
+            browserUrlInput={browserUrlInput}
+            browserSnapshot={browserSnapshot}
+            browserActionLog={browserActionLog}
+            browserNetworkLog={browserNetworkLog}
+            browserTraceSnapshot={browserTraceSnapshot}
+            browserGuestPreloadUrl={browserGuestPreloadUrl}
+            browserScriptInput={browserScriptInput}
+            browserActionSelector={browserActionSelector}
+            browserActionText={browserActionText}
+            browserActionTimeoutMs={browserActionTimeoutMs}
+            lastBrowserAutomationResult={lastBrowserAutomationResult}
+            browserPromptSnapshot={browserPromptSnapshot}
+            browserCommand={browserCommand}
+            browserCommandNonce={browserCommandNonce}
+            browserTargetUrl={browserTargetUrl}
+            onBrowserUrlInputChange={setBrowserUrlInput}
+            onBrowserScriptInputChange={setBrowserScriptInput}
+            onBrowserActionSelectorChange={setBrowserActionSelector}
+            onBrowserActionTextChange={setBrowserActionText}
+            onBrowserActionTimeoutChange={setBrowserActionTimeoutMs}
+            onNavigateBrowser={() => {
+              void navigateBrowser();
+            }}
+            onRunBrowserCommand={(command) => {
+              void runBrowserCommand(command);
+            }}
+            onBrowserScriptExecuted={({ ok, preview }) => {
+              setLastBrowserAutomationResult({
+                ok,
+                action: "runScript",
+                preview,
+              });
+              setStatus(ok ? `页面脚本执行完成：${preview}` : `页面脚本执行失败：${preview}`);
+            }}
+            onRunBrowserAutomation={runBrowserAutomation}
+            onClearBrowserLogs={() => {
+              void clearBrowserLogs();
+            }}
+            showAdvancedControls={browserShowAdvancedControls}
+            isActive
+          />
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell" data-theme={theme}>
       <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark">
-            <img src={novayxkLogo} alt="" />
+        <div className="topbar-leading">
+          <div className="brand-block">
+            <div className="brand-mark">
+              <img src={novayxkLogo} alt="" />
+            </div>
+            <div>
+              <h1>{PRODUCT_NAME}</h1>
+              <p>{PRODUCT_TAGLINE}</p>
+            </div>
           </div>
-          <div>
-            <h1>{PRODUCT_NAME}</h1>
-            <p>{PRODUCT_TAGLINE}</p>
+          <div className="topbar-project-state">
+            <span>当前工作区</span>
+            <strong>{project ? shortPath(project.root) : "未打开项目"}</strong>
           </div>
         </div>
 
         <div className="top-actions">
-          <div className={`privilege-chip ${privilege?.isAdmin ? "admin" : "standard"}`}>
-            {privilege?.isAdmin ? <ShieldCheck size={15} /> : <LockKeyhole size={15} />}
-            {getPrivilegeChipLabel(privilege?.isAdmin)}
-          </div>
-          <div className={`control-mode ${aiControlMode === "full" ? "full" : "safe"}`}>
+          <div className="top-actions-meta">
+            <div className={`privilege-chip ${privilege?.isAdmin ? "admin" : "standard"}`}>
+              {privilege?.isAdmin ? <ShieldCheck size={15} /> : <LockKeyhole size={15} />}
+              {getPrivilegeChipLabel(privilege?.isAdmin)}
+            </div>
+            <div className={`control-mode ${aiControlMode === "full" ? "full" : "safe"}`}>
+              <button
+                className={aiControlMode === "safe" ? "active" : ""}
+                onClick={() => void updateAiControlMode("safe")}
+                title={getExecutionModeTitle("safe")}
+              >
+                <LockKeyhole size={15} />
+                {getExecutionModeLabel("safe")}
+              </button>
+              <button
+                className={aiControlMode === "full" ? "active" : ""}
+                onClick={() => void updateAiControlMode("full")}
+                title={getExecutionModeTitle("full")}
+              >
+                <UnlockKeyhole size={15} />
+                {getExecutionModeLabel("full")}
+              </button>
+            </div>
             <button
-              className={aiControlMode === "safe" ? "active" : ""}
-              onClick={() => void updateAiControlMode("safe")}
-              title={getExecutionModeTitle("safe")}
+              className="theme-toggle"
+              onClick={() => void updateTheme(theme === "dark" ? "light" : "dark")}
+              title={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
             >
-              <LockKeyhole size={15} />
-              {getExecutionModeLabel("safe")}
-            </button>
-            <button
-              className={aiControlMode === "full" ? "active" : ""}
-              onClick={() => void updateAiControlMode("full")}
-              title={getExecutionModeTitle("full")}
-            >
-              <UnlockKeyhole size={15} />
-              {getExecutionModeLabel("full")}
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
           </div>
-          <button
-            className="theme-toggle"
-            onClick={() => void updateTheme(theme === "dark" ? "light" : "dark")}
-            title={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
-          >
-            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <select
-            className="model-select"
-            value={activeProviderId}
-            onChange={(event) => void switchActiveProvider(event.target.value)}
-            aria-label="选择模型供应商"
-          >
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name} / {provider.model}
-              </option>
-            ))}
-          </select>
-          <button
-            className="ghost-button"
-            onClick={() => {
-              setEditingProviderId(activeProvider.id);
-              setIsSettingsOpen(true);
-            }}
-          >
-            <Settings size={17} />
-            设置
-          </button>
-          <button className="primary-button" onClick={openProject}>
-            <FolderOpen size={17} />
-            打开项目
-          </button>
+          <div className="top-actions-main">
+            <select
+              className="model-select"
+              value={activeProviderId}
+              onChange={(event) => void switchActiveProvider(event.target.value)}
+              aria-label="选择模型供应商"
+            >
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name} / {provider.model || "未选择模型"}
+                </option>
+              ))}
+            </select>
+            <button
+              className="ghost-button"
+              onClick={() => {
+                setEditingProviderId(activeProvider.id);
+                setIsSettingsOpen(true);
+              }}
+            >
+              <Settings size={17} />
+              设置
+            </button>
+            <button className="primary-button" onClick={openProject}>
+              <FolderOpen size={17} />
+              打开项目
+            </button>
+          </div>
         </div>
       </header>
 
@@ -601,27 +814,29 @@ function App() {
           </button>
         )}
 
-        <ProjectSidebar
-          isCollapsed={isLeftCollapsed}
-          projectRoot={project?.root ?? null}
-          treeFilter={treeFilter}
-          filteredFileTree={filteredFileTree}
-          hasTreeFilter={hasTreeFilter}
-          isSearchingTree={isSearchingTree}
-          expandedPaths={expandedPaths}
-          selectedPath={activeTreePath ?? selectedFile?.path}
-          loadingDirectories={loadingDirectories}
-          onCollapse={() => setIsLeftCollapsed(true)}
-          onTreeFilterChange={setTreeFilter}
-          onClearTreeFilter={() => setTreeFilter("")}
-          onRefreshTree={refreshTree}
-          onExpandAll={expandAllTreeFolders}
-          onCollapseAll={collapseAllTreeFolders}
-          onCreateEntry={createTreeEntry}
-          onSelectFile={selectFile}
-        />
+        {isSidebarVisible && (
+          <ProjectSidebar
+            isCollapsed={false}
+            projectRoot={project?.root ?? null}
+            treeFilter={treeFilter}
+            filteredFileTree={filteredFileTree}
+            hasTreeFilter={hasTreeFilter}
+            isSearchingTree={isSearchingTree}
+            expandedPaths={expandedPaths}
+            selectedPath={activeTreePath ?? selectedFile?.path}
+            loadingDirectories={loadingDirectories}
+            onCollapse={() => setIsLeftCollapsed(true)}
+            onTreeFilterChange={setTreeFilter}
+            onClearTreeFilter={() => setTreeFilter("")}
+            onRefreshTree={refreshTree}
+            onExpandAll={expandAllTreeFolders}
+            onCollapseAll={collapseAllTreeFolders}
+            onCreateEntry={createTreeEntry}
+            onSelectFile={selectFile}
+          />
+        )}
 
-        {!isLeftCollapsed && (
+        {isSidebarVisible && (
           <div
             className="resize-handle vertical left-handle"
             onPointerDown={(event) => startPanelResize(event, "left")}
@@ -630,82 +845,76 @@ function App() {
           />
         )}
 
-        <section className={`editor-area ${isBottomCollapsed ? "bottom-collapsed" : ""}`} style={editorStyle}>
-          <EditorPane
-            selectedFile={selectedFile}
-            isEditorDirty={isEditorDirty}
-            stats={selectedFileStats}
-            editorFind={editorFind}
-            editorFindMatches={editorFindMatches}
-            isWordWrapEnabled={isWordWrapEnabled}
-            isBottomCollapsed={isBottomCollapsed}
-            aiControlMode={aiControlMode}
-            workspaceGuideKind={displayedWorkspaceGuideKind}
-            onEditorFindChange={setEditorFind}
-            onToggleWordWrap={() => setIsWordWrapEnabled((value) => !value)}
-            onShowBottomPanel={() => setIsBottomCollapsed(false)}
-            onSaveSelectedFile={saveSelectedFile}
-            onOpenSettings={() => {
-              setEditingProviderId(activeProvider.id);
-              setIsSettingsOpen(true);
-            }}
-            onOpenProject={() => {
-              void openProject();
-            }}
-            onUseGuidePrompt={(nextPrompt) => {
-              setIsRightCollapsed(false);
-              setPrompt(nextPrompt);
-              setAssistantPromptFocusNonce((value) => value + 1);
-              setStatus(getGuidePromptStatus());
-            }}
-            onSelectedFileContentChange={(content) => {
-              if (!selectedFile) return;
-              setSelectedFile({ ...selectedFile, content });
-              setIsEditorDirty(true);
-            }}
-            onEditorKeyDown={(event) => {
-              if (!selectedFile) return;
-              handleCodeEditorKeyDown(event, selectedFile, setSelectedFile, setIsEditorDirty);
-            }}
-          />
-
-          {!isBottomCollapsed && (
-            <div
-              className="resize-handle horizontal bottom-handle"
-              onPointerDown={(event) => startPanelResize(event, "bottom")}
-              role="separator"
-              aria-label="调整底部工具区高度"
+        {isCenterVisible && (
+          <section className={`editor-area ${isBottomCollapsed ? "bottom-collapsed" : ""}`} style={editorStyle}>
+            <EditorPane
+              selectedFile={selectedFile}
+              isEditorDirty={isEditorDirty}
+              stats={selectedFileStats}
+              editorFind={editorFind}
+              editorFindMatches={editorFindMatches}
+              isWordWrapEnabled={isWordWrapEnabled}
+              isBottomCollapsed={isBottomCollapsed}
+              aiControlMode={aiControlMode}
+              workspaceGuideKind={displayedWorkspaceGuideKind}
+              onEditorFindChange={setEditorFind}
+              onToggleWordWrap={() => setIsWordWrapEnabled((value) => !value)}
+              onShowBottomPanel={() => setIsBottomCollapsed(false)}
+              onSaveSelectedFile={saveSelectedFile}
+              onOpenSettings={() => {
+                setEditingProviderId(activeProvider.id);
+                setIsSettingsOpen(true);
+              }}
+              onOpenProject={() => {
+                void openProject();
+              }}
+              onUseGuidePrompt={(nextPrompt) => {
+                setIsRightCollapsed(false);
+                setPrompt(nextPrompt);
+                setAssistantPromptFocusNonce((value) => value + 1);
+                setStatus(getGuidePromptStatus());
+              }}
+              onSelectedFileContentChange={(content) => {
+                if (!selectedTextFile) return;
+                setSelectedFile({ ...selectedTextFile, content });
+                setIsEditorDirty(true);
+              }}
+              onEditorKeyDown={(event) => {
+                if (!selectedTextFile) return;
+                handleCodeEditorKeyDown(event, selectedTextFile, setSelectedFile, setIsEditorDirty);
+              }}
             />
-          )}
 
-          <div className="bottom-grid" aria-hidden={isBottomCollapsed}>
-            <TerminalPanel
-              canUndoPatch={canUndoPatch}
-              isLoading={isLoading}
-              hasPatchPreview={Boolean(patchPreview)}
-              hasProject={Boolean(project)}
-              fileOpsPreviewCount={fileOpsPreview.length}
-              terminalCommand={terminalCommand}
-              terminalInput={terminalInput}
-              terminalTasks={terminalTasks}
-              activeTerminalTask={activeTerminalTask}
-              runningTerminalTaskCount={runningTerminalTaskCount}
-              projectRoot={project?.root ?? null}
-              onUndoPatch={undoPatch}
-              onAskApplyPatch={askApplyPatch}
-              onAskApplyFileOps={askApplyFileOps}
-              onCopyTerminalOutput={copyTerminalOutput}
-              onCollapse={() => setIsBottomCollapsed(true)}
-              onTerminalCommandChange={setTerminalCommand}
-              onStartTerminalTask={startTerminalTask}
-              onStopActiveTerminalTask={stopActiveTerminalTask}
-              onRestartActiveTerminalTask={restartActiveTerminalTask}
-              onSelectTerminalTask={setActiveTerminalTaskId}
-              onTerminalInputChange={setTerminalInput}
-              onSendTerminalInput={sendTerminalInput}
-            />
-          </div>
-        </section>
+            {!isBottomCollapsed && (
+              <div
+                className="resize-handle horizontal bottom-handle"
+                onPointerDown={(event) => startPanelResize(event, "bottom")}
+                role="separator"
+                aria-label="调整底部工具区高度"
+              />
+            )}
+
+            <div className="bottom-grid" aria-hidden={isBottomCollapsed}>
+              <TerminalPanel
+                canUndoPatch={canUndoPatch}
+                isLoading={isLoading}
+                hasPatchPreview={Boolean(patchPreview)}
+                hasProject={Boolean(project)}
+                fileOpsPreviewCount={fileOpsPreview.length}
+                terminalTasks={terminalTasks}
+                activeTerminalTask={activeTerminalTask}
+                runningTerminalTaskCount={runningTerminalTaskCount}
+                projectRoot={project?.root ?? null}
+                onUndoPatch={undoPatch}
+                onAskApplyPatch={askApplyPatch}
+                onAskApplyFileOps={askApplyFileOps}
+                onCopyTerminalOutput={copyTerminalOutput}
+                onCollapse={() => setIsBottomCollapsed(true)}
+                onSelectTerminalTask={setActiveTerminalTaskId}
+              />
+            </div>
+          </section>
+        )}
 
         {!isRightCollapsed && (
           <div
@@ -718,7 +927,8 @@ function App() {
 
         <AssistantPanel
           isCollapsed={isRightCollapsed}
-          model={activeProvider.model}
+          model={activeProvider.model || "未选择模型"}
+          assistantMode={assistantMode}
           hasProject={Boolean(project)}
           isModelReady={hasConfiguredProvider}
           activeTaskId={activeTaskId}
@@ -736,9 +946,11 @@ function App() {
           chatListRef={chatListRef}
           onCollapse={() => setIsRightCollapsed(true)}
           onLoadTask={(taskId) => {
+            setEditingMessageIndex(null);
             void loadTask(taskId);
           }}
           onStartNewTask={() => {
+            setEditingMessageIndex(null);
             void startNewTask();
           }}
           onSaveCurrentTask={saveCurrentTaskWithStatus}
@@ -749,7 +961,17 @@ function App() {
           }}
           onPromptChange={setPrompt}
           onSendMessage={sendMessage}
+          onAssistantModeChange={switchAssistantMode}
           onStopGeneration={stopGeneration}
+          editingMessageIndex={editingMessageIndex}
+          onEditPreviousPrompt={(index) => {
+            const targetMessage = messages[index];
+            if (!targetMessage || targetMessage.role !== "user") return;
+            setPrompt(targetMessage.content);
+            setEditingMessageIndex(index);
+            setAssistantPromptFocusNonce((value) => value + 1);
+            setStatus("已回填上一条问题，重新发送后会覆盖原回答。");
+          }}
         />
       </section>
 
@@ -765,6 +987,10 @@ function App() {
           editingProvider={editingProvider}
           providerTestStatus={providerTestStatus}
           isTestingProvider={isTestingProvider}
+          providerModelOptions={providerModelOptions[editingProvider.id] ?? []}
+          providerModelStatus={providerModelStatus}
+          isLoadingProviderModels={isLoadingProviderModels}
+          browserShowAdvancedControls={browserShowAdvancedControls}
           privilege={privilege}
           isRestartingAsAdmin={isRestartingAsAdmin}
           onSelectProvider={setEditingProviderId}
@@ -772,6 +998,12 @@ function App() {
           onRemoveProvider={removeActiveProvider}
           onUpdateProvider={updateActiveProvider}
           onTestProvider={testActiveProvider}
+          onReloadModels={() => {
+            void loadProviderModels(editingProvider, { force: true });
+          }}
+          onToggleBrowserShowAdvancedControls={(value) => {
+            void updateBrowserShowAdvancedControls(value);
+          }}
           onRestartAsAdmin={() => {
             void restartAsAdmin();
           }}

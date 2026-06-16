@@ -3,7 +3,21 @@ export type UserIntentKind = "knowledge" | "inspect" | "execute";
 export type UserIntentProfile = {
   kind: UserIntentKind;
   autoExecutePowerShell: boolean;
+  needsLightPlan: boolean;
 };
+
+function shouldUseLightPlan(prompt: string) {
+  const normalized = prompt.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.length < 18) return false;
+
+  return (
+    /(?:先别改|不要改|先不改|先看|先检查|先分析|先梳理|看完后|然后总结|总结一下|排查|修复|重构|多步骤|一步一步|逐步|流程|计划)/i.test(
+      normalized,
+    ) ||
+    /(?:并且|然后|再|同时|顺便|另外).{0,20}(?:检查|分析|总结|处理|修改|修复)/i.test(normalized)
+  );
+}
 
 function hasDirectActionIntent(normalized: string) {
   return /(?:卸载|安装|删除|打开|关闭|停止|启动|更新|升级|下载|清理|移除|重启|运行|执行|处理)(?:[\s\S]{0,8}(?:吧|一下|下|它|这个|掉|了吧|一下吧|一下它|下它|一下这个))?/i.test(
@@ -11,9 +25,16 @@ function hasDirectActionIntent(normalized: string) {
   );
 }
 
+function hasExplicitOnlineSearchIntent(normalized: string) {
+  return /(?:上网(?:去)?搜|联网(?:去)?搜|去搜|搜一下|搜一搜|查资料|查网页|查新闻|联网核实|上网核实|帮我搜|帮我查资料|搜索一下|检索一下|look ?up|search)/i.test(
+    normalized,
+  );
+}
+
 export function shouldAutoExecutePowerShellForPrompt(prompt: string) {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) return false;
+  const explicitOnlineSearch = hasExplicitOnlineSearchIntent(normalized);
 
   if (/```(?:powershell-run|ps-run|shell-run)|`[^`\n]+`/.test(prompt)) {
     return true;
@@ -21,7 +42,8 @@ export function shouldAutoExecutePowerShellForPrompt(prompt: string) {
 
   if (
     /^(?:什么是|啥是|是什么意思|介绍一下|解释一下|讲讲|科普一下|聊聊|说说|你知道.*吗|了解一下)/i.test(normalized) &&
-    !/(?:帮我查|帮我看|帮我搜|帮我验证|帮我检查|帮我安装|帮我运行|帮我执行|帮我打开|帮我下载|帮我配置)/i.test(normalized)
+    !/(?:帮我查|帮我看|帮我搜|帮我验证|帮我检查|帮我安装|帮我运行|帮我执行|帮我打开|帮我下载|帮我配置)/i.test(normalized) &&
+    !explicitOnlineSearch
   ) {
     return false;
   }
@@ -31,6 +53,10 @@ export function shouldAutoExecutePowerShellForPrompt(prompt: string) {
   }
 
   if (hasDirectActionIntent(normalized)) {
+    return true;
+  }
+
+  if (explicitOnlineSearch) {
     return true;
   }
 
@@ -57,19 +83,27 @@ export function shouldAutoInspectCurrentMachine(prompt: string) {
 export function getUserIntentProfile(prompt: string): UserIntentProfile {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) {
-    return { kind: "knowledge", autoExecutePowerShell: false };
+    return { kind: "knowledge", autoExecutePowerShell: false, needsLightPlan: false };
   }
 
   const autoExecutePowerShell = shouldAutoExecutePowerShellForPrompt(prompt);
+  const needsLightPlan = shouldUseLightPlan(prompt);
   if (autoExecutePowerShell) {
-    return { kind: "execute", autoExecutePowerShell: true };
+    return { kind: "execute", autoExecutePowerShell: true, needsLightPlan };
+  }
+
+  if (
+    /(?:浏览器|网页|页面|登录|轨迹|操作|接口|api|请求|从.+到|怎么.+进|咋.+进|你.*看到)/i.test(normalized) &&
+    /(?:怎么看|怎么进|咋进|看到|轨迹|操作|接口|api|请求|登录页面|到这里|调了|掉了)/i.test(normalized)
+  ) {
+    return { kind: "inspect", autoExecutePowerShell: false, needsLightPlan };
   }
 
   if (
     /^(?:什么是|啥是|是什么意思|介绍一下|解释一下|讲讲|科普一下|聊聊|说说|你知道.*吗|了解一下)/i.test(normalized) ||
     /(?:如何|怎么|为什么|为啥|原理|区别|用途|作用)/i.test(normalized)
   ) {
-    return { kind: "knowledge", autoExecutePowerShell: false };
+    return { kind: "knowledge", autoExecutePowerShell: false, needsLightPlan };
   }
 
   if (
@@ -77,20 +111,30 @@ export function getUserIntentProfile(prompt: string): UserIntentProfile {
       normalized,
     )
   ) {
-    return { kind: "inspect", autoExecutePowerShell: shouldAutoInspectCurrentMachine(prompt) };
+    return { kind: "inspect", autoExecutePowerShell: shouldAutoInspectCurrentMachine(prompt), needsLightPlan };
   }
 
-  return { kind: "knowledge", autoExecutePowerShell: false };
+  return { kind: "knowledge", autoExecutePowerShell: false, needsLightPlan };
 }
 
 export function buildUserIntentInstruction(profile: UserIntentProfile) {
   if (profile.kind === "execute") {
-    return "【本轮任务类型】代为操作。用户这轮明确要求你执行、安装、打开、修改、搜索或处理某件事。可以输出 powershell-run、fileops 或补丁，但要先说清这一步是在做什么，以及结果会影响哪里。";
+    return `【本轮任务类型】代为操作。用户这轮明确要求你执行、安装、打开、修改、搜索或处理某件事。可以输出 powershell-run、fileops 或补丁，但要先说清这一步是在做什么，以及结果会影响哪里。${
+      profile.needsLightPlan
+        ? " 这轮任务较复杂时，可以先给 2 到 4 条极简计划，但计划后必须继续执行或给出可直接落地的下一步，不能只停在计划。"
+        : ""
+    }`;
   }
 
   if (profile.kind === "inspect") {
-    return "【本轮任务类型】状态核实。用户这轮主要是想确认电脑、环境、软件或项目的当前状态。凡是涉及当前电脑、本机软件、系统环境、安装状态、进程、服务、注册表或版本的判断，优先先查再答，不要只凭常识直接下结论。优先用 1 到 3 条最直接、最可靠的检查命令完成任务，不要为了显得全面就拼接很长的多段脚本，除非简单检查确实不够。若只做了单一来源检查，或命令输出为空、乱码、截断，不要直接下“不存在/没有安装”的结论。";
+    return `【本轮任务类型】状态核实。用户这轮主要是想确认电脑、环境、软件或项目的当前状态。凡是涉及当前电脑、本机软件、系统环境、安装状态、进程、服务、注册表或版本的判断，优先先查再答，不要只凭常识直接下结论。优先用 1 到 3 条最直接、最可靠的检查命令完成任务，不要为了显得全面就拼接很长的多段脚本，除非简单检查确实不够。若只做了单一来源检查，或命令输出为空、乱码、截断，不要直接下“不存在/没有安装”的结论。${
+      profile.needsLightPlan
+        ? " 如果任务明显分阶段，比如先看项目再总结，可以先给极简计划，但必须在同一轮继续给检查结果或总结。"
+        : ""
+    }`;
   }
 
-  return "【本轮任务类型】解释问答。用户这轮主要是在问概念、原理、区别或用途。先直接回答，不要为了顺手帮忙主动输出 powershell-run、fileops 或补丁，除非用户明确要求你代为执行。";
+  return `【本轮任务类型】解释问答。用户这轮主要是在问概念、原理、区别或用途。先直接回答，不要为了顺手帮忙主动输出 powershell-run、fileops 或补丁，除非用户明确要求你代为执行。${
+    profile.needsLightPlan ? " 如果问题本身是复杂流程或多阶段分析，可以用极简计划组织答案，但不要只给计划。": ""
+  }`;
 }

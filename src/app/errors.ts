@@ -25,6 +25,10 @@ export function formatActionableError(error: unknown, fallback: string) {
     return `${base}：目标文件或目录已经不存在。请先刷新工作区，再重新执行这一步。`;
   }
 
+  if (/图片生成超时|模型请求超时|读取模型列表超时|连接超时|ETIMEDOUT/i.test(message)) {
+    return `${base}：${message}`;
+  }
+
   if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up|网络|连接超时|连接被重置/i.test(message)) {
     return `${base}：网络连接没有成功。请检查 Base URL、代理设置和当前网络后重试。`;
   }

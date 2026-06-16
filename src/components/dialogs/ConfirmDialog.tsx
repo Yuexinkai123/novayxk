@@ -105,9 +105,11 @@ function ConfirmDialogBody({ dialog }: { dialog: ConfirmDialogState }) {
                 ? "创建目录"
                 : operation.type === "delete"
                   ? "删除路径"
-                  : operation.overwrite
-                    ? "覆盖写入"
-                    : "写入文件"}
+                  : operation.type === "replace"
+                    ? "替换文本"
+                    : operation.overwrite
+                      ? "覆盖写入"
+                      : "写入文件"}
               ：{operation.path}
             </li>
           ))}

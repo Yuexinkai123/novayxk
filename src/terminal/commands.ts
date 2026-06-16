@@ -1,5 +1,5 @@
 export const COMMAND_LOOP_SAFETY_LIMIT = 50;
-const COMMAND_LOOP_REPEAT_LIMIT = 2;
+const COMMAND_LOOP_REPEAT_LIMIT = 9;
 
 export type PowerShellCommandRequest = {
   command: string;

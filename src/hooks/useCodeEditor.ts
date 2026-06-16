@@ -1,4 +1,5 @@
 import React from "react";
+import type { ProjectSelectedFile, ProjectTextFile } from "../vite-env";
 
 export function getEditorStats(content: string) {
   return {
@@ -23,8 +24,8 @@ export function countTextMatches(content: string, query: string) {
 
 export function handleCodeEditorKeyDown(
   event: React.KeyboardEvent<HTMLTextAreaElement>,
-  selectedFile: { path: string; content: string },
-  setSelectedFile: React.Dispatch<React.SetStateAction<{ path: string; content: string } | null>>,
+  selectedFile: ProjectTextFile,
+  setSelectedFile: React.Dispatch<React.SetStateAction<ProjectSelectedFile | null>>,
   setIsEditorDirty: React.Dispatch<React.SetStateAction<boolean>>,
 ) {
   if (event.key !== "Tab" && event.key !== "Enter") return;

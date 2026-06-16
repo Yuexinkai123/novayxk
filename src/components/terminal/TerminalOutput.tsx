@@ -9,7 +9,7 @@ type TerminalOutputProps = {
 
 function getInitialTerminalText(task: TerminalTask | null) {
   if (!task) {
-    return "启动长期服务或后台命令后，这里会实时显示输出。AI 返回的 diff/fileops 仍可用右上角按钮处理。";
+    return "";
   }
   return task.output || `${task.command}\r\n\r\n任务已启动，等待输出...`;
 }
@@ -48,7 +48,7 @@ export function TerminalOutput({ activeTerminalTask }: TerminalOutputProps) {
         lineHeight: 1.65,
         scrollback: 5000,
         theme: {
-          background: "#00000000",
+          background: "#0a0f16",
           foreground: "#c8d4ff",
           cursor: "#9bb2ff",
           selectionBackground: "rgba(173, 198, 255, 0.22)",
