@@ -216,7 +216,7 @@ export function AssistantPanel({
                   <Pencil size={13} />
                 </button>
               ) : null}
-              <MarkdownView content={stripContext(message.content)} />
+              <MarkdownView content={stripContext(message.content)} language={language} />
               <MessageAttachments attachments={message.attachments} strings={strings.images} />
               {message.role === "assistant" ? (
                 <MessageMeta elapsedMs={message.elapsedMs} tokenUsage={message.tokenUsage} strings={strings} />
@@ -230,7 +230,7 @@ export function AssistantPanel({
               <Bot size={16} />
             </div>
             <div className="message-body">
-              <MarkdownView content={strings.working} />
+              <MarkdownView content={strings.working} language={language} />
               <div className="message-meta">{strings.elapsed} {formatElapsedSeconds(loadingElapsedMs)}</div>
             </div>
           </article>

@@ -254,6 +254,37 @@ export type BrowserAutomationResult = {
   preview: string;
 };
 
+export type WebSearchRequest = {
+  query: string;
+  domains?: string[];
+  maxResults?: number;
+  includePageContent?: boolean;
+  includePageContentCount?: number;
+};
+
+export type WebSearchResult = {
+  title: string;
+  url: string;
+  host: string;
+  snippet: string;
+  displayedUrl?: string;
+  publishedAt?: string;
+  pageTitle?: string;
+  pageDescription?: string;
+  pageExcerpt?: string;
+  pageError?: string;
+};
+
+export type WebSearchResponse = {
+  query: string;
+  engine: string;
+  searchedAt: string;
+  resultCount: number;
+  pageFetchCount: number;
+  warnings?: string[];
+  results: WebSearchResult[];
+};
+
 export type BrowserRemoteRequest =
   | {
       type: "navigate";
@@ -349,6 +380,7 @@ declare global {
         request: { provider: ProviderConfig; messages: ChatMessage[] },
         handlers: { onChunk?: (chunk: string) => void },
       ) => Promise<void>;
+      webSearch: (request: WebSearchRequest) => Promise<WebSearchResponse>;
       cancelActiveChatStream: () => Promise<{ ok: boolean }>;
       generateImage: (request: {
         provider: ProviderConfig;

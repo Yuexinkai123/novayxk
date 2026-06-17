@@ -9,11 +9,13 @@ import {
   detectInternalControlModeRequest,
   extractBrowserActions,
   extractFileOps,
+  extractWebSearchRequests,
   formatProjectContext,
   getAssistantModeProfile,
   getAutomationRecoveryIssue,
   getBrowserActionsParseIssue,
   getFileOpsParseIssue,
+  getWebSearchParseIssue,
   hasDestructiveFileOps,
   getProjectContextMode,
   normalizeAssistantToolCallContent,
@@ -31,6 +33,7 @@ import {
 import { inspectSensitiveGeneratedContent, isWriteLikePowerShellCommand } from "../policy/sensitive";
 import type {
   AiControlMode,
+  AppLanguage,
   AssistantMode,
   BrowserAutomationResult,
   ChatMessage,
@@ -43,6 +46,8 @@ import type {
   TaskHistory,
   TerminalTask,
   TokenUsage,
+  WebSearchRequest,
+  WebSearchResponse,
 } from "../vite-env";
 import {
   COMMAND_LOOP_SAFETY_LIMIT,
@@ -61,6 +66,7 @@ type CommandInspection = { requiresAdmin?: boolean; adminReason?: string; requir
 
 const BROWSER_AUTOMATION_LOOP_LIMIT = 4;
 const BROWSER_AUTOMATION_REPEAT_LIMIT = 2;
+const WEB_SEARCH_LOOP_LIMIT = 3;
 const MODEL_REQUEST_MAX_RETRIES = 5;
 const DEEP_VERIFICATION_CONTEXT_LIMIT = 5000;
 const SENSITIVE_AUTOMATION_PATTERN =
@@ -93,6 +99,7 @@ type UseAiAssistantOptions = {
   runtimePermissionContext: RuntimePermissionContext;
   aiControlMode: AiControlMode;
   assistantMode: AssistantMode;
+  language: AppLanguage;
   privilege: PrivilegeState;
   openBrowserWorkspace: () => void;
   getBrowserPromptContext: () => Promise<string>;
@@ -147,6 +154,7 @@ export function useAiAssistant({
   runtimePermissionContext,
   aiControlMode,
   assistantMode,
+  language,
   privilege,
   openBrowserWorkspace,
   getBrowserPromptContext,
@@ -169,6 +177,38 @@ export function useAiAssistant({
   restartAsAdmin,
   syncProjectView,
 }: UseAiAssistantOptions) {
+  const isChinese = language === "zh-CN";
+  const localizedStopMessage = isChinese ? "已停止生成。" : "Generation stopped.";
+  const localizedStopStatus = isChinese ? "已停止生成" : "Generation stopped";
+  const localizedTexts = {
+    executionOutput: isChinese ? "执行结果" : "Execution Output",
+    powershellExecutionOutput: isChinese ? "PowerShell 执行结果：" : "PowerShell execution output:",
+    builtInWebSearchResults: isChinese ? "内置联网搜索结果：" : "Built-in web search results:",
+    sourceInline: isChinese ? "来源：在普通内容里检测到类似命令的文本" : "Source: command-like text detected in normal content",
+    sourceCodeBlock: isChinese ? "来源：powershell-run 代码块" : "Source: powershell-run code block",
+    terminalTask: isChinese ? "终端任务" : "Terminal task",
+    exitCode: isChinese ? "退出码" : "Exit code",
+    stillRunningStatus: isChinese ? "状态：仍在终端任务中运行" : "Status: still running as a terminal task",
+    noCommandSummary: isChinese ? "命令已执行，但模型没有返回总结。" : "The command finished, but the model did not return a summary.",
+    noWebSearchSummary: isChinese ? "内置联网搜索已完成，但模型没有返回总结。" : "The built-in web search finished, but the model did not return a summary.",
+    warnings: isChinese ? "警告" : "Warnings",
+    url: "URL",
+    host: isChinese ? "域名" : "Host",
+    displayedUrl: isChinese ? "展示链接" : "Displayed URL",
+    publishedAt: isChinese ? "发布时间" : "Published",
+    searchSnippet: isChinese ? "搜索摘要" : "Search snippet",
+    pageTitle: isChinese ? "页面标题" : "Page title",
+    pageDescription: isChinese ? "页面描述" : "Page description",
+    pageExcerpt: isChinese ? "页面摘录" : "Page excerpt",
+    pageFetchNote: isChinese ? "页面抓取说明" : "Page fetch note",
+    noResults: isChinese ? "没有结果。" : "No results.",
+    builtInWebSearchQuery: isChinese ? "内置联网搜索查询" : "Built-in web search query",
+    engine: isChinese ? "搜索引擎" : "Engine",
+    searchedAt: isChinese ? "搜索时间" : "Searched at",
+    resultCount: isChinese ? "结果数量" : "Result count",
+    fetchedPagePreviews: isChinese ? "抓取到的页面预览数" : "Fetched page previews",
+  } as const;
+
   async function waitForUiCommit() {
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => {
@@ -263,7 +303,16 @@ export function useAiAssistant({
     const promptMessages: ChatMessage[] = [
       {
         role: "system",
-        content: `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+        content: isChinese
+          ? `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+
+【深度复查规则】
+你正在执行一次动作后的复查。只能根据已经真实发生的结果判断，不要想象成功。
+- 只用 1 到 2 句短句。
+- 必须以下列其一开头："深度复查：已确认"、"深度复查：大体确认"、或 "深度复查：未确认"。
+- 然后补充最关键的一条证据，或者说明仍需人工确认的主要点。
+- 不要输出 powershell-run、fileops、browser-actions、diff 或 JSON。`
+          : `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
 
 [Deep verification rules]
 You are performing a post-execution verification pass. Judge only from real results that already happened; do not imagine success.
@@ -274,7 +323,9 @@ You are performing a post-execution verification pass. Judge only from real resu
       },
       {
         role: "user",
-        content: `Original user goal: ${userGoal || "Not provided"}\n\nVerification target: ${label}\n\nReal evidence:\n${truncateForVerification(evidence)}`,
+        content: isChinese
+          ? `原始用户目标：${userGoal || "未提供"}\n\n复查目标：${label}\n\n真实证据：\n${truncateForVerification(evidence)}`
+          : `Original user goal: ${userGoal || "Not provided"}\n\nVerification target: ${label}\n\nReal evidence:\n${truncateForVerification(evidence)}`,
       },
     ];
 
@@ -330,21 +381,21 @@ You are performing a post-execution verification pass. Judge only from real resu
           if (file.content === operation.content) {
             confirmedWrites += 1;
           } else {
-            failedChecks.push(`${operation.path}: the read-back content does not match the written content`);
+            failedChecks.push(`${operation.path}: ${isChinese ? "回读内容与写入内容不一致" : "the read-back content does not match the written content"}`);
           }
         } else if (!file.content.includes(operation.replace)) {
-          failedChecks.push(`${operation.path}: the replacement text was not found after reading the file back`);
+          failedChecks.push(`${operation.path}: ${isChinese ? "回读后没有找到替换后的文本" : "the replacement text was not found after reading the file back"}`);
         } else if (operation.occurrence === "all" && file.content.includes(operation.search)) {
-          failedChecks.push(`${operation.path}: some original text that should have been replaced is still present`);
+          failedChecks.push(`${operation.path}: ${isChinese ? "应该被替换掉的原文本仍然存在" : "some original text that should have been replaced is still present"}`);
         } else {
           confirmedWrites += 1;
         }
 
         if (depth === "deep") {
-          evidenceBlocks.push(`File ${operation.path}:\n${truncateForVerification(file.content.slice(0, 1400), 1400)}`);
+          evidenceBlocks.push(`${isChinese ? "文件" : "File"} ${operation.path}:\n${truncateForVerification(file.content.slice(0, 1400), 1400)}`);
         }
       } catch (error) {
-        failedChecks.push(`${operation.path}: ${error instanceof Error ? error.message : "read-back failed"}`);
+        failedChecks.push(`${operation.path}: ${error instanceof Error ? error.message : isChinese ? "回读失败" : "read-back failed"}`);
       }
     }
 
@@ -352,20 +403,24 @@ You are performing a post-execution verification pass. Judge only from real resu
       if (await doesProjectPathExist(operation.path)) {
         confirmedDirs += 1;
       } else {
-        failedChecks.push(`${operation.path}: the directory did not appear in the project tree`);
+        failedChecks.push(`${operation.path}: ${isChinese ? "项目树里没有出现这个目录" : "the directory did not appear in the project tree"}`);
       }
     }
 
     const writeLikeChecked = Math.min(writeLikeOperations.length, writeLikeLimit);
     const mkdirChecked = Math.min(mkdirOperations.length, mkdirLimit);
     const confirmedSegments = [
-      writeLikeChecked ? `${confirmedWrites}/${writeLikeChecked} key file write-backs confirmed` : "",
-      mkdirChecked ? `${confirmedDirs}/${mkdirChecked} directories confirmed created` : "",
+      writeLikeChecked ? (isChinese ? `${confirmedWrites}/${writeLikeChecked} 个关键文件已回读确认` : `${confirmedWrites}/${writeLikeChecked} key file write-backs confirmed`) : "",
+      mkdirChecked ? (isChinese ? `${confirmedDirs}/${mkdirChecked} 个目录已确认创建` : `${confirmedDirs}/${mkdirChecked} directories confirmed created`) : "",
     ].filter(Boolean);
     const baseNote =
       failedChecks.length > 0
-        ? `Verified: ${confirmedSegments.length ? `confirmed ${confirmedSegments.join(", ")}` : "automatic execution already returned success"}; unresolved checks remain: ${failedChecks.join("; ")}.`
-        : `Verified: ${confirmedSegments.length ? `confirmed ${confirmedSegments.join(", ")}` : "automatic execution already returned success"}.`;
+        ? isChinese
+          ? `已复查：${confirmedSegments.length ? confirmedSegments.join("，") : "自动执行本身已返回成功"}；仍有未解决检查项：${failedChecks.join("；")}。`
+          : `Verified: ${confirmedSegments.length ? `confirmed ${confirmedSegments.join(", ")}` : "automatic execution already returned success"}; unresolved checks remain: ${failedChecks.join("; ")}.`
+        : isChinese
+          ? `已复查：${confirmedSegments.length ? confirmedSegments.join("，") : "自动执行本身已返回成功"}。`
+          : `Verified: ${confirmedSegments.length ? `confirmed ${confirmedSegments.join(", ")}` : "automatic execution already returned success"}.`;
 
     if (depth !== "deep") {
       return { note: baseNote };
@@ -375,8 +430,8 @@ You are performing a post-execution verification pass. Judge only from real resu
       "File operation result",
       baseMessages,
       [
-        `Local verification: ${baseNote}`,
-        changedFiles.length ? `Changed files: ${changedFiles.join(", ")}` : "",
+        `${isChinese ? "本地复查" : "Local verification"}: ${baseNote}`,
+        changedFiles.length ? `${isChinese ? "变更文件" : "Changed files"}: ${changedFiles.join(", ")}` : "",
         ...evidenceBlocks,
       ]
         .filter(Boolean)
@@ -395,15 +450,23 @@ You are performing a post-execution verification pass. Judge only from real resu
     const emptySucceeded = commandResults.filter((result) => result.code === 0 && !result.output.trim());
 
     if (running.length) {
-      return `Verified: ${running.length} command(s) are still running in the terminal, so the task cannot be considered complete yet.`;
+      return isChinese
+        ? `已复查：仍有 ${running.length} 条命令在终端里继续运行，所以这个任务暂时还不能视为完成。`
+        : `Verified: ${running.length} command(s) are still running in the terminal, so the task cannot be considered complete yet.`;
     }
     if (failed.length) {
-      return `Verified: ${failed.length} command(s) exited with a non-zero code, so this result is not fully complete yet.`;
+      return isChinese
+        ? `已复查：有 ${failed.length} 条命令以非零退出码结束，所以这个结果还不能算完全完成。`
+        : `Verified: ${failed.length} command(s) exited with a non-zero code, so this result is not fully complete yet.`;
     }
     if (emptySucceeded.length) {
-      return `Verified: all commands exited normally, but ${emptySucceeded.length} step(s) produced no visible output, so only command execution is confirmed, not the full target state.`;
+      return isChinese
+        ? `已复查：所有命令都正常退出了，但有 ${emptySucceeded.length} 步没有可见输出，所以目前只能确认命令执行过，不能完全确认目标状态。`
+        : `Verified: all commands exited normally, but ${emptySucceeded.length} step(s) produced no visible output, so only command execution is confirmed, not the full target state.`;
     }
-    return "Verified: all automatically executed commands produced visible output and exited normally.";
+    return isChinese
+      ? "已复查：所有自动执行的命令都产生了可见输出，并且正常退出。"
+      : "Verified: all automatically executed commands produced visible output and exited normally.";
   }
 
   async function buildCommandVerificationSummary(
@@ -418,9 +481,9 @@ You are performing a post-execution verification pass. Judge only from real resu
     }
 
     const deepVerification = await requestDeepVerification(
-      "PowerShell execution result",
+      isChinese ? "PowerShell 执行结果" : "PowerShell execution result",
       baseMessages,
-      `Local verification: ${baseNote}\n\nModel summary:\n${summaryContent}\n\nReal command output:\n${executionContent}`,
+      `${isChinese ? "本地复查" : "Local verification"}: ${baseNote}\n\n${isChinese ? "模型总结" : "Model summary"}:\n${summaryContent}\n\n${isChinese ? "真实命令输出" : "Real command output"}:\n${executionContent}`,
     ).catch(() => ({ note: "" } as VerificationSummary));
 
     return {
@@ -438,10 +501,18 @@ You are performing a post-execution verification pass. Judge only from real resu
     if (!bridge) return { note: "" };
 
     const snapshot = await bridge.getBrowserSnapshot().catch(() => null);
-    const locationNote = snapshot ? `${snapshot.title || "Current page"} · ${snapshot.currentUrl}` : "Current page information is temporarily unavailable";
+    const locationNote = snapshot
+      ? `${snapshot.title || (isChinese ? "当前页面" : "Current page")} · ${snapshot.currentUrl}`
+      : isChinese
+        ? "当前页面信息暂时不可用"
+        : "Current page information is temporarily unavailable";
     const baseNote = followUpNote
-      ? `Verified: the browser is currently on ${locationNote}. The automatic flow stopped in this round because: ${followUpNote}`
-      : `Verified: the browser is currently on ${locationNote}. No failures were detected in this round of automatic actions.`;
+      ? isChinese
+        ? `已复查：浏览器当前位于 ${locationNote}。本轮自动流程停止的原因是：${followUpNote}`
+        : `Verified: the browser is currently on ${locationNote}. The automatic flow stopped in this round because: ${followUpNote}`
+      : isChinese
+        ? `已复查：浏览器当前位于 ${locationNote}。本轮自动动作没有检测到失败。`
+        : `Verified: the browser is currently on ${locationNote}. No failures were detected in this round of automatic actions.`;
 
     if (getVerificationDepth(assistantMode) !== "deep") {
       return { note: baseNote };
@@ -449,7 +520,7 @@ You are performing a post-execution verification pass. Judge only from real resu
 
     const browserContext = await getBrowserPromptContext().catch(() => "");
     const deepVerification = await requestDeepVerification(
-      "Browser automation result",
+      isChinese ? "浏览器自动化结果" : "Browser automation result",
       baseMessages,
       [baseNote, ...roundBlocks, browserContext].filter(Boolean).join("\n\n"),
     ).catch(() => ({ note: "" } as VerificationSummary));
@@ -462,9 +533,9 @@ You are performing a post-execution verification pass. Judge only from real resu
 
   function buildImageVerificationSummary(imageCount: number): VerificationSummary {
     if (imageCount <= 0) {
-      return { note: "Verified: the endpoint returned no image files, so this result cannot be considered complete." };
+      return { note: isChinese ? "已复查：接口没有返回任何图片文件，所以这个结果不能视为完成。" : "Verified: the endpoint returned no image files, so this result cannot be considered complete." };
     }
-    return { note: `Verified: ${imageCount} image file(s) were received and saved in the local generated-images directory.` };
+    return { note: isChinese ? `已复查：收到了 ${imageCount} 个图片文件，并已保存到本地 generated-images 目录。` : `Verified: ${imageCount} image file(s) were received and saved in the local generated-images directory.` };
   }
 
   async function handleInternalControlModeRequest(userPrompt: string, nextMessages: ChatMessage[]) {
@@ -968,9 +1039,9 @@ You are performing a post-execution verification pass. Judge only from real resu
           setActiveTerminalTaskId(result.terminalTask.id);
           showBottomPanel();
         }
-        const sourceNote = commandRequest.source === "inline" ? "Source: command-like text detected in normal content" : "Source: powershell-run code block";
-        const taskNote = result.terminalTask ? `Terminal task: ${result.terminalTask.id}` : "";
-        const output = `${sourceNote}\n${taskNote ? `${taskNote}\n` : ""}$ ${commandText}\n${result.output}\n${result.longRunning ? "Status: still running as a terminal task" : `Exit code: ${result.code}`}`;
+        const sourceNote = commandRequest.source === "inline" ? localizedTexts.sourceInline : localizedTexts.sourceCodeBlock;
+        const taskNote = result.terminalTask ? `${localizedTexts.terminalTask}: ${result.terminalTask.id}` : "";
+        const output = `${sourceNote}\n${taskNote ? `${taskNote}\n` : ""}$ ${commandText}\n${result.output}\n${result.longRunning ? localizedTexts.stillRunningStatus : `${localizedTexts.exitCode}: ${result.code}`}`;
         resultLines.push(output);
         commandResults.push({
           command: commandText,
@@ -979,7 +1050,7 @@ You are performing a post-execution verification pass. Judge only from real resu
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "AI PowerShell execution failed";
-        const sourceNote = commandRequest.source === "inline" ? "Source: command-like text detected in normal content" : "Source: powershell-run code block";
+        const sourceNote = commandRequest.source === "inline" ? localizedTexts.sourceInline : localizedTexts.sourceCodeBlock;
         resultLines.push(`${sourceNote}\n$ ${commandText}\n${message}`);
         commandResults.push({ command: commandText, output: message, code: 1 });
       }
@@ -994,8 +1065,10 @@ You are performing a post-execution verification pass. Judge only from real resu
 
     if (stopRequestedRef.current) {
       const stoppedContent = resultLines.length
-        ? `Generation stopped, and any running terminal task was asked to stop.\n\nPowerShell execution output:\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``
-        : "Generation stopped, and any running terminal task was asked to stop.";
+        ? `${isChinese ? "已停止生成，并已请求停止所有仍在运行的终端任务。" : "Generation stopped, and any running terminal task was asked to stop."}\n\n${localizedTexts.powershellExecutionOutput}\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``
+        : isChinese
+          ? "已停止生成，并已请求停止所有仍在运行的终端任务。"
+          : "Generation stopped, and any running terminal task was asked to stop.";
       const stoppedMessages: ChatMessage[] = [
         ...baseMessages,
         {
@@ -1004,11 +1077,11 @@ You are performing a post-execution verification pass. Judge only from real resu
         },
       ];
       setMessages(stoppedMessages);
-      setStatus("Generation stopped");
+      setStatus(localizedStopStatus);
       return stoppedMessages;
     }
 
-    const executionContent = `PowerShell execution output:\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``;
+    const executionContent = `${localizedTexts.powershellExecutionOutput}\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``;
     const nextMessages: ChatMessage[] = [
       ...baseMessages,
       {
@@ -1071,12 +1144,12 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
       });
 
       const finalSummaryContent = stripPrematurePowerShellResultText(normalizeAssistantToolCallContent(summaryContent)).trim();
-      const summaryUsage = buildEstimatedTokenUsage(summaryMessages, finalSummaryContent || "The command finished, but the model did not return a summary.");
+      const summaryUsage = buildEstimatedTokenUsage(summaryMessages, finalSummaryContent || localizedTexts.noCommandSummary);
       let finalMessages: ChatMessage[] = [
         ...nextMessages,
         {
           role: "assistant",
-          content: finalSummaryContent || "The command finished, but the model did not return a summary.",
+          content: finalSummaryContent || localizedTexts.noCommandSummary,
           elapsedMs: Date.now() - summaryStartedAt,
           tokenUsage: summaryUsage,
         },
@@ -1104,7 +1177,7 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
         baseMessages,
         commandResults,
         executionContent,
-        finalSummaryContent || "The command finished, but the model did not return a summary.",
+        finalSummaryContent || localizedTexts.noCommandSummary,
       );
       if (verification.note) {
         const lastMessage = finalMessages[finalMessages.length - 1];
@@ -1123,10 +1196,278 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to summarize the command result";
       if (message === STREAM_ABORT_MESSAGE) {
-        setStatus("Generation stopped");
+        setStatus(localizedStopStatus);
         return nextMessages;
       }
       setStatus(formatActionableError(error, "Failed to summarize the command result"));
+      return nextMessages;
+    }
+  }
+
+  function formatWebSearchResponse(response: WebSearchResponse) {
+    const warningBlock = response.warnings?.length ? `${localizedTexts.warnings}:\n${response.warnings.map((item) => `- ${item}`).join("\n")}\n\n` : "";
+    const resultsBlock = response.results.length
+      ? response.results
+        .map((result, index) =>
+          [
+            `${index + 1}. ${result.title}`,
+            `${localizedTexts.url}: ${result.url}`,
+            `${localizedTexts.host}: ${result.host}`,
+            result.displayedUrl ? `${localizedTexts.displayedUrl}: ${result.displayedUrl}` : "",
+            result.publishedAt ? `${localizedTexts.publishedAt}: ${result.publishedAt}` : "",
+            result.snippet ? `${localizedTexts.searchSnippet}: ${result.snippet}` : "",
+            result.pageTitle ? `${localizedTexts.pageTitle}: ${result.pageTitle}` : "",
+            result.pageDescription ? `${localizedTexts.pageDescription}: ${result.pageDescription}` : "",
+            result.pageExcerpt ? `${localizedTexts.pageExcerpt}: ${truncateForVerification(result.pageExcerpt, 900)}` : "",
+            result.pageError ? `${localizedTexts.pageFetchNote}: ${result.pageError}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        )
+        .join("\n\n")
+      : localizedTexts.noResults;
+
+    return [
+      `${localizedTexts.builtInWebSearchQuery}: ${response.query}`,
+      `${localizedTexts.engine}: ${response.engine}`,
+      `${localizedTexts.searchedAt}: ${response.searchedAt}`,
+      `${localizedTexts.resultCount}: ${response.resultCount}`,
+      `${localizedTexts.fetchedPagePreviews}: ${response.pageFetchCount}`,
+      "",
+      `${warningBlock}${resultsBlock}`.trim(),
+    ].join("\n");
+  }
+
+  function getWebSearchLoopKey(request: WebSearchRequest) {
+    return JSON.stringify({
+      query: request.query.trim().toLowerCase(),
+      domains: [...(request.domains ?? [])].map((entry) => entry.trim().toLowerCase()).sort(),
+      maxResults: request.maxResults ?? null,
+      includePageContent: request.includePageContent ?? null,
+      includePageContentCount: request.includePageContentCount ?? null,
+    });
+  }
+
+  async function buildWebSearchVerificationSummary(
+    baseMessages: ChatMessage[],
+    responses: WebSearchResponse[],
+    summaryContent: string,
+  ): Promise<VerificationSummary> {
+    const totalResults = responses.reduce((sum, response) => sum + response.resultCount, 0);
+    const totalFetchedPages = responses.reduce((sum, response) => sum + response.pageFetchCount, 0);
+    const baseNote =
+      totalResults > 0
+        ? isChinese
+          ? `已复查：内置联网搜索共返回了 ${totalResults} 条结果，经历了 ${responses.length} 轮搜索步骤，并抓取了 ${totalFetchedPages} 个来源页面预览。`
+          : `Verified: the built-in web search returned ${totalResults} result(s) across ${responses.length} search step(s), and fetched page previews for ${totalFetchedPages} source page(s).`
+        : isChinese
+          ? "已复查：内置联网搜索没有返回可用的匹配结果，因此目前还没有建立可靠的在线确认。"
+          : "Verified: the built-in web search did not return any usable matching result, so no online confirmation was established.";
+
+    if (getVerificationDepth(assistantMode) !== "deep") {
+      return { note: baseNote };
+    }
+
+    const deepVerification = await requestDeepVerification(
+      isChinese ? "内置联网搜索结果" : "Built-in web search result",
+      baseMessages,
+      [
+        ...responses.map((response) => formatWebSearchResponse(response)),
+        `${isChinese ? "基于搜索证据的模型总结" : "Model summary from the search evidence"}:\n${summaryContent}`,
+      ].join("\n\n"),
+    ).catch(() => ({ note: "" } as VerificationSummary));
+
+    return {
+      note: deepVerification.note ? `${baseNote}\n${deepVerification.note}` : baseNote,
+      tokenUsage: deepVerification.tokenUsage,
+    };
+  }
+
+  async function executeAiWebSearch(
+    assistantContent: string,
+    baseMessages: ChatMessage[],
+    seenSearches = new Set<string>(),
+    round = 1,
+  ) {
+    const requests = extractWebSearchRequests(assistantContent);
+    if (!requests.length) {
+      const parseIssue = getWebSearchParseIssue(assistantContent);
+      if (!parseIssue) return null;
+      const nextMessages: ChatMessage[] = [
+        ...baseMessages,
+        {
+          role: "assistant",
+          content: `An incomplete \`web-search\` block or JSON parsing failure was detected.\n\nReason: ${parseIssue}\n\nPlease output a strict JSON \`web-search\` block such as {"query":"latest GPT-5.4 release","domains":["openai.com"],"maxResults":5,"includePageContent":true,"includePageContentCount":2}.`,
+        },
+      ];
+      setMessages(nextMessages);
+      setStatus("The web-search block is incomplete and may have been truncated by the model output length");
+      return nextMessages;
+    }
+
+    if (!window.novayxk) {
+      const blockedMessages: ChatMessage[] = [
+        ...baseMessages,
+        {
+          role: "assistant",
+          content: "Built-in web search was detected, but it was not executed because the app is not currently running in the Electron desktop environment.",
+        },
+      ];
+      setMessages(blockedMessages);
+      return blockedMessages;
+    }
+
+    const freshRequests: WebSearchRequest[] = [];
+    for (const request of requests.slice(0, 3)) {
+      const key = getWebSearchLoopKey(request);
+      if (seenSearches.has(key)) continue;
+      seenSearches.add(key);
+      freshRequests.push(request);
+    }
+
+    if (!freshRequests.length) {
+      const repeatedMessages: ChatMessage[] = [
+        ...baseMessages,
+        {
+          role: "assistant",
+          content: "Novayxk automatically stopped repeated built-in web searches because the same search request had already been executed.",
+        },
+      ];
+      setMessages(repeatedMessages);
+      setStatus("Repeated built-in web-search steps were detected and stopped automatically");
+      return repeatedMessages;
+    }
+
+    setStatus("The AI is using the built-in web search...");
+    const responses: WebSearchResponse[] = [];
+    const resultBlocks: string[] = [];
+
+    for (const request of freshRequests) {
+      const response = await window.novayxk.webSearch(request);
+      responses.push(response);
+      resultBlocks.push(formatWebSearchResponse(response));
+    }
+
+    const executionContent = `${localizedTexts.builtInWebSearchResults}\n\n\`\`\`text\n${resultBlocks.join("\n\n-----\n\n").slice(0, 22000)}\n\`\`\``;
+    const nextMessages: ChatMessage[] = [
+      ...baseMessages,
+      {
+        role: "assistant",
+        content: executionContent,
+      },
+    ];
+    setMessages(nextMessages);
+    setStatus("The AI is organizing the built-in web search results...");
+
+    const bridge = window.novayxk;
+    if (!bridge) {
+      return nextMessages;
+    }
+
+    try {
+      let summaryContent = "";
+      const summaryStartedAt = Date.now();
+      setLoadingStartedAt(summaryStartedAt);
+      setLoadingElapsedMs(0);
+      const summaryMessages: ChatMessage[] = [
+        {
+          role: "system",
+          content: `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+
+[Built-in web search reply rules]
+Novayxk already executed the built-in web search for you. You must now answer the user's original question directly from the real search evidence.
+- Start with the conclusion, then give only the necessary supporting detail.
+- Distinguish confirmed facts, unconfirmed claims, and your own inference.
+- If official sources conflict with media coverage, say so clearly and prefer the official source.
+- If the evidence is weak, blocked, snippet-only, or missing, say that there is not enough reliable evidence yet.
+- Mention source names and URLs in plain text when they matter.
+- If one more targeted search is truly necessary, you may output exactly one valid \`\`\`web-search\`\`\` block for the next step.
+- Do not output powershell-run just to search the web again unless a local command is genuinely required.
+- Do not invent article contents when a page fetch failed or was blocked.`,
+        },
+        ...sanitizeChatHistory(baseMessages).slice(-getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
+        {
+          role: "user",
+          content: `Novayxk already executed the built-in web search automatically. Please answer my original question directly from the real search evidence.\n\n${executionContent}`,
+        },
+      ];
+
+      await runModelRequestWithRetries("Built-in web search summary request", async () => {
+        summaryContent = "";
+        setMessages([...nextMessages, { role: "assistant", content: "" }]);
+        await bridge.chatStream(
+          {
+            provider: activeProvider,
+            messages: summaryMessages,
+          },
+          {
+            onChunk: (chunk) => {
+              summaryContent += chunk;
+              setMessages([...nextMessages, { role: "assistant", content: normalizeAssistantToolCallContent(summaryContent) }]);
+            },
+          },
+        );
+      });
+
+      const finalSummaryContent = stripPrematurePowerShellResultText(normalizeAssistantToolCallContent(summaryContent)).trim();
+      const summaryUsage = buildEstimatedTokenUsage(summaryMessages, finalSummaryContent || localizedTexts.noWebSearchSummary);
+      let finalMessages: ChatMessage[] = [
+        ...nextMessages,
+        {
+          role: "assistant",
+          content: finalSummaryContent || localizedTexts.noWebSearchSummary,
+          elapsedMs: Date.now() - summaryStartedAt,
+          tokenUsage: summaryUsage,
+        },
+      ];
+      setMessages(finalMessages);
+
+      const followUpRequests = extractWebSearchRequests(finalSummaryContent);
+      if (followUpRequests.length && round < WEB_SEARCH_LOOP_LIMIT) {
+        setStatus("Detected a follow-up built-in web search step. Continuing...");
+        return executeAiWebSearch(finalSummaryContent, finalMessages, seenSearches, round + 1);
+      }
+      if (followUpRequests.length) {
+        const safetyMessages: ChatMessage[] = [
+          ...finalMessages,
+          {
+            role: "assistant",
+            content:
+              "Novayxk triggered the built-in web-search safety fuse because there were too many consecutive search rounds. Automatic continuation was stopped to avoid getting stuck in repeated lookups.",
+          },
+        ];
+        setMessages(safetyMessages);
+        setStatus("Too many consecutive built-in web-search steps triggered the safety fuse");
+        return safetyMessages;
+      }
+
+      const verification = await buildWebSearchVerificationSummary(
+        baseMessages,
+        responses,
+        finalSummaryContent || localizedTexts.noWebSearchSummary,
+      );
+      if (verification.note) {
+        const lastMessage = finalMessages[finalMessages.length - 1];
+        finalMessages = [
+          ...finalMessages.slice(0, -1),
+          {
+            ...lastMessage,
+            content: appendVerificationNote(lastMessage.content, verification.note),
+            tokenUsage: mergeTokenUsage(lastMessage.tokenUsage, verification.tokenUsage),
+          },
+        ];
+        setMessages(finalMessages);
+      }
+
+      setStatus("Built-in web search completed and a conclusion was generated");
+      return finalMessages;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to summarize the built-in web search result";
+      if (message === STREAM_ABORT_MESSAGE) {
+        setStatus(localizedStopStatus);
+        return nextMessages;
+      }
+      setStatus(formatActionableError(error, "Failed to summarize the built-in web search result"));
       return nextMessages;
     }
   }
@@ -1401,7 +1742,7 @@ Please decide whether another step is needed now.`,
               content:
                 `Your previous reply stopped mid-sentence and did not provide a complete answer. Output one full replacement reply instead of continuing the fragment.\n\n` +
                 `Requirements:\n` +
-                `1. If this turn requires inspection or execution, output the complete powershell-run / fileops / patch content directly.\n` +
+                `1. If this turn requires inspection or execution, output the complete powershell-run / fileops / browser-actions / web-search / patch content directly.\n` +
                 `2. If no execution is needed, give the full conclusion directly.\n` +
                 `3. If this turn is about browser traces, page actions, API requests, or project structure, give the full timeline, key interfaces, key files, and any gaps you cannot see.\n` +
                 `4. Do not write only lead-ins such as "Let me check", "Here it is", or "Let me read the trace first".\n` +
@@ -1463,10 +1804,12 @@ Please decide whether another step is needed now.`,
                 `You must follow these rules:\n` +
                 `1. For project file changes, output only a valid \`\`\`fileops\`\`\` JSON array. The only allowed fields are type, path, content, overwrite, search, replace, and occurrence.\n` +
                 `2. Every fileops path must be a relative path inside the current project. Do not use absolute paths such as Desktop, Downloads, or Documents.\n` +
-                `3. If the target is the Desktop, Downloads, a system directory, a browser open action, an external webpage, a system file, or any path outside the project, use \`\`\`powershell-run\`\`\` instead.\n` +
-                `4. Do not output the old JSON shape like { operation/create/path/content } again.\n` +
-                `5. If the content is long, prefer multiple steps instead of only giving a lead-in.\n` +
-                `6. Output only the final complete replacement reply that can actually run.`,
+                `3. For browser page actions, output only a valid \`\`\`browser-actions\`\`\` JSON payload.\n` +
+                `4. For built-in online lookup, output only a valid \`\`\`web-search\`\`\` JSON payload such as {"query":"...","domains":["openai.com"],"maxResults":5,"includePageContent":true,"includePageContentCount":2}.\n` +
+                `5. If the target is the Desktop, Downloads, a system directory, a system file, or any path outside the project, use \`\`\`powershell-run\`\`\` instead.\n` +
+                `6. Do not output the old JSON shape like { operation/create/path/content } again.\n` +
+                `7. If the content is long, prefer multiple steps instead of only giving a lead-in.\n` +
+                `8. Output only the final complete replacement reply that can actually run.`,
             },
           ],
         },
@@ -1562,12 +1905,12 @@ Please decide whether another step is needed now.`,
             ...nextMessages,
             {
               role: "assistant",
-              content: "Generation stopped.",
+              content: localizedStopMessage,
               elapsedMs: Date.now() - responseStartedAt,
             },
           ];
           setMessages(stoppedMessages);
-          setStatus("Generation stopped");
+          setStatus(localizedStopStatus);
           await saveCurrentTask(stoppedMessages);
         } else {
           const content = formatActionableError(error, "Image generation failed");
@@ -1676,15 +2019,18 @@ Please decide whether another step is needed now.`,
       await waitForUiCommit();
       const fileOpMessages = await executeAiFileOperations(completedContent, completedMessages);
       const browserActionMessages = await executeAiBrowserActions(completedContent, fileOpMessages ?? completedMessages);
-      const commandResultMessages = userIntent.autoExecutePowerShell || extractPowerShellCommandRequests(completedContent).length > 0
-        ? await executeAiPowerShellCommands(completedContent, browserActionMessages ?? fileOpMessages ?? completedMessages)
+      const webSearchMessages = await executeAiWebSearch(completedContent, browserActionMessages ?? fileOpMessages ?? completedMessages);
+      const commandSourceMessages = webSearchMessages ?? browserActionMessages ?? fileOpMessages ?? completedMessages;
+      const commandSourceContent = commandSourceMessages[commandSourceMessages.length - 1]?.content ?? completedContent;
+      const commandResultMessages = userIntent.autoExecutePowerShell || extractPowerShellCommandRequests(commandSourceContent).length > 0
+        ? await executeAiPowerShellCommands(commandSourceContent, commandSourceMessages)
         : null;
-      await saveCurrentTask(commandResultMessages ?? browserActionMessages ?? fileOpMessages ?? completedMessages);
-      setStatus(commandResultMessages ? "The model has organized the command result" : "Model response complete");
+      await saveCurrentTask(commandResultMessages ?? webSearchMessages ?? browserActionMessages ?? fileOpMessages ?? completedMessages);
+      setStatus(commandResultMessages || webSearchMessages ? "The model has organized the execution result" : "Model response complete");
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "Model request failed";
       if (rawMessage === STREAM_ABORT_MESSAGE) {
-        const stoppedContent = normalizeAssistantToolCallContent(streamedContent).trim() || "Generation stopped.";
+        const stoppedContent = normalizeAssistantToolCallContent(streamedContent).trim() || localizedStopMessage;
         const stoppedMessages: ChatMessage[] = [
           ...nextMessages,
           {
@@ -1695,7 +2041,7 @@ Please decide whether another step is needed now.`,
           },
         ];
         setMessages(stoppedMessages);
-        setStatus("Generation stopped");
+        setStatus(localizedStopStatus);
         if (streamedContent.trim()) {
           await saveCurrentTask(stoppedMessages);
         }

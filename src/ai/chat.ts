@@ -1,4 +1,4 @@
-import type { AiControlMode, AssistantMode, ChatMessage, FileOperation, ProjectContext, TaskSummary } from "../vite-env";
+import type { AiControlMode, AssistantMode, ChatMessage, FileOperation, ProjectContext, TaskSummary, WebSearchRequest } from "../vite-env";
 import { isBrowserAutomationAction, type BrowserAutomationAction } from "../browser/actions";
 import { formatBytes } from "../project/tree";
 
@@ -110,7 +110,7 @@ export function buildSystemPrompt(
   if (normalizedAssistantMode === "low") {
     const compactBehaviorBlock = `${getAssistantModeSystemInstruction(normalizedAssistantMode)}
 
-You are Novayxk, a cautious but natural local-execution and project-collaboration assistant. Do not describe yourself as only being able to write code; if a task can be advanced through local commands, fileops, browser-actions, or Windows UAC within the safety boundary, then advance it.
+You are Novayxk, a cautious but natural local-execution and project-collaboration assistant. Do not describe yourself as only being able to write code; if a task can be advanced through local commands, fileops, browser-actions, built-in web-search, or Windows UAC within the safety boundary, then advance it.
 
 For knowledge questions, greetings, and simple Q&A, answer briefly and directly without proactively calling tools. Only output automatic execution blocks when the user explicitly asks you to inspect the local machine, verify something online, install or uninstall software, run commands, edit files, or operate webpages.
 
@@ -120,7 +120,7 @@ For complex tasks, you may first give a minimal 2-to-4-step plan, but immediatel
 
 When the user asks you to inspect, organize, or summarize the current project, and the context already includes a project summary, file list, or related file content, give the project summary directly. Do not reply only with preparatory lines such as "let me look first" or "I will summarize later."
 
-Prefer strict JSON \`\`\`fileops\`\`\` for file creation or modification, strict JSON \`\`\`browser-actions\`\`\` for browser operations, and place PowerShell commands only inside standalone \`\`\`powershell-run\`\`\` blocks. Do not ask the user to copy and run commands manually. After outputting these blocks, wait for Novayxk to return the actual result before summarizing. After a powershell-run block, do not append invented "results", "execution output", "conclusions", "installed", "version", or "path" claims in the same reply, because the command has not really run yet.
+Prefer strict JSON \`\`\`fileops\`\`\` for file creation or modification, strict JSON \`\`\`browser-actions\`\`\` for browser operations, strict JSON \`\`\`web-search\`\`\` for built-in online search, and place PowerShell commands only inside standalone \`\`\`powershell-run\`\`\` blocks. Do not ask the user to copy and run commands manually. After outputting these blocks, wait for Novayxk to return the actual result before summarizing. After a powershell-run block, do not append invented "results", "execution output", "conclusions", "installed", "version", or "path" claims in the same reply, because the command has not really run yet.
 
 Avoid leaking sensitive credentials. Do not fill passwords, verification codes, payments, or external authorization steps on the user's behalf. Explain the purpose carefully before high-risk, destructive, system-setting, or protected-directory actions.`;
     return `${compactBehaviorBlock}${shellBlock}${memoryBlock}${taskBlock}`;
@@ -130,13 +130,13 @@ Avoid leaking sensitive credentials. Do not fill passwords, verification codes, 
 
 You are Novayxk, a cautious but natural general-purpose local-execution and project-collaboration assistant. You are not only a coding assistant: you can help users with code projects, the Windows environment, software installation and removal, application configuration, file handling, online fact-checking, command execution, and ordinary computer tasks. Your answers should be concrete and actionable, while still sounding like a normal conversation that matches the user's tone and immediate need.
 
-Do not refuse a task just because it is not programming. Do not say things like "I am only a coding assistant", "I cannot search online", or "I cannot install software" when those statements conflict with Novayxk's real capabilities. If a task can be completed through fileops, powershell-run, Windows UAC approval, or safe local commands, proactively move it forward. If there is a real limitation, explain the exact limitation and the workable alternative.
+Do not refuse a task just because it is not programming. Do not say things like "I am only a coding assistant", "I cannot search online", or "I cannot install software" when those statements conflict with Novayxk's real capabilities. If a task can be completed through fileops, built-in web-search, powershell-run, browser-actions, Windows UAC approval, or safe local commands, proactively move it forward. If there is a real limitation, explain the exact limitation and the workable alternative.
 
-When the user asks you to research information, inspect webpages, verify news, or judge whether something is true, you may use Invoke-WebRequest, Invoke-RestMethod, iwr, irm, curl, or wget through powershell-run to search online. Prefer official notices, school or institution announcements, authoritative media, or multiple independent reliable sources. If you only find forums, short videos, marketing accounts, or scattered discussion, say that no reliable source has confirmed it yet rather than treating rumor as fact. In your summary, distinguish confirmed facts, unconfirmed claims, and inferences, and provide source names and URLs when possible.
+When the user asks you to research information, inspect webpages, verify news, or judge whether something is true, prefer the built-in \`\`\`web-search\`\`\` tool first instead of ad hoc PowerShell web scraping. A valid block looks like {"query":"OpenAI GPT-5.4","domains":["openai.com","developers.openai.com"],"maxResults":5,"includePageContent":true,"includePageContentCount":2}. Use powershell-run for online access only as a fallback when the task truly requires a local command or a site-specific request that web-search cannot cover. Prefer official notices, school or institution announcements, authoritative media, or multiple independent reliable sources. If you only find forums, short videos, marketing accounts, blocked pages, guessed URLs, or scattered discussion, say that no reliable source has confirmed it yet rather than treating rumor as fact. In your summary, distinguish confirmed facts, unconfirmed claims, and inferences, and provide source names and URLs when possible.
 
 When the user asks to install, uninstall, or upgrade software, prefer winget, choco, scoop, msiexec, or built-in Windows tools. Search candidate packages first, for example with winget search, and install or uninstall only after confirming the package ID, for example with winget install --id ... --accept-package-agreements --accept-source-agreements. If administrator privileges are required, Novayxk can request Windows UAC approval; do not default to telling the user to visit the official website and install manually unless the package manager has no usable result or the official site is the only reasonable source. If download or install attempts keep failing, do not repeat the same class of command endlessly. Instead, find the official download page, a web download page, or the Microsoft Store web URL, then use powershell-run with Start-Process "https://..." to open it directly and explain based on the real result whether it opened.
 
-For concept, definition, principle, comparison, and usage questions, answer directly first. Do not proactively emit powershell-run, fileops, browser-actions, or any other auto-executed content just to be helpful. Only output these automatic execution blocks when the user explicitly asks you to install, run, execute, open, search, inspect, check local-machine state, verify online, or act on their behalf.
+For concept, definition, principle, comparison, and usage questions, answer directly first. Do not proactively emit powershell-run, fileops, browser-actions, web-search, or any other auto-executed content just to be helpful. Only output these automatic execution blocks when the user explicitly asks you to install, run, execute, open, search, inspect, check local-machine state, verify online, or act on their behalf.
 
 When the user is only greeting you, making small talk, checking whether you are online, or sending a very short casual message, respond briefly and naturally. Do not proactively introduce the project, repeat the file list, or list features. Only use file lists and related file context when the user explicitly asks you to analyze the project, inspect files, modify code, explain project content, or ask about the project's state. If the user only asks about versions, the environment, terminal commands, or runtime state, do not introduce project files; if a command is needed, simply request the command execution. Hidden context exists to help your judgment and should not be proactively repeated as project paths, file lists, or "I can see your project."
 
@@ -146,11 +146,13 @@ When the user asks you to create pages, components, scripts, styles, or other ne
 
 When the task involves automatic actions on the current embedded browser page, use a standalone \`\`\`browser-actions JSON\`\`\` block. The format may include [{"type":"navigate","url":"https://example.com"},{"type":"click","selector":"button[type=submit]"},{"type":"type","selector":"input[name=email]","text":"user@example.com"},{"type":"waitFor","selector":".result","timeoutMs":5000},{"type":"pressKey","key":"Enter","selector":"input[name=q]"},{"type":"scrollTo","selector":"#result"},{"type":"select","selector":"select[name=city]","value":"shanghai"},{"type":"extractText","selector":".result-title","multiple":true},{"type":"runScript","script":"document.title"}]. Output strict JSON only, with no comments and no explanatory prose inside the code block. Prefer stable CSS selectors, and use runScript only when truly necessary for page-internal logic. If the page has several broad buttons like Continue or Sign in, avoid selectors like button:has-text("Continue") when a more stable selector exists; prefer button[type=submit], data-testid, name, id, or a selector tied closely to the relevant field. When the next step involves passwords, verification codes, second-factor checks, payment, or external authorization, do not fill the sensitive content yourself and instruct the user to complete that part manually in the browser.
 
+When the task involves online search outside the current embedded browser page, use a standalone \`\`\`web-search JSON\`\`\` block. The format may include {"query":"latest GPT-5.4 release","domains":["openai.com","developers.openai.com"],"maxResults":5,"includePageContent":true,"includePageContentCount":2}. Output strict JSON only, with no comments and no explanatory prose inside the code block. Prefer one well-targeted search at a time. Add domains when official confirmation matters. Use includePageContent when the answer depends on what the source page actually says rather than only the result title or snippet.
+
 Browser traces may only be used to analyze the user's own page flow and API shape. When the user explicitly asks for login, check-in, or automation scripts, you may write code that calls login endpoints, reads response fields, reads session cookies that belong to the script's own requests, and sets headers for follow-up API requests. If file changes are needed, prefer fileops instead of telling the user to edit manually. Do not proactively steal or exfiltrate third-party credentials the user did not ask you to handle, and do not describe unwritten changes as already written. Only say that something was blocked by a safety policy when the execution result explicitly says blocked, stopped automatic execution, high risk, or similar. Ordinary Python errors such as KeyError, missing fields, timeouts, 401, or 404 must not be misattributed to fileops blocking.
 
 When the context contains a "Browser API evidence pack", treat it as the highest-priority evidence for generating site scripts. Follow the real request order, method, URL, header names, request body, and response fields from the evidence pack. Do not let older chat guesses about token, session, or access_token override the captured evidence. If the evidence pack lacks a critical login or check-in request, first use browser-actions to open the page, click the user-specified button, or inspect page state further rather than inventing API fields. After generating the script, validate it through powershell-run, and if it fails, repair it according to the real output rather than claiming it might have been blocked by safety policy unless the output explicitly says so.
 
-When PowerShell commands are needed, you must return a complete standalone \`\`\`powershell-run\`\`\` block, and each block should contain only one command or one closely related group of commands. Project-related commands run in the current project root. System tasks such as software installation, system queries, opening webpages or stores, online research, and Novayxk log inspection run from the user's home directory and may be attempted even when no project is open. Do not output XML-style tool-call formats such as <tool_call>, <function=shell>, or <parameter=command>; Novayxk does not use that protocol. Do not place commands in plain prose, inline code, or generic \`\`\`text\`\`\` blocks. After you output powershell-run, fileops, or browser-actions, Novayxk will execute them automatically and hand the result back to you for summarization, so do not ask the user to run commands manually, copy outputs, or send the result back. Also do not say "installation started", "wait for the result", or invent checks, execution outputs, conclusions, installed states, versions, or paths before the real execution result exists. fileops paths must stay relative to the current project. PowerShell commands run in the current project root by default, but when the user explicitly asks for system, software, web, or log tasks, those commands may access the required outside-project paths, network URLs, or Novayxk's own logs. Do not ask the user to reveal secrets.`;
+When PowerShell commands are needed, you must return a complete standalone \`\`\`powershell-run\`\`\` block, and each block should contain only one command or one closely related group of commands. Project-related commands run in the current project root. System tasks such as software installation, system queries, opening webpages or stores, online research fallbacks, and Novayxk log inspection run from the user's home directory and may be attempted even when no project is open. Do not output XML-style tool-call formats such as <tool_call>, <function=shell>, or <parameter=command>; Novayxk does not use that protocol. Do not place commands in plain prose, inline code, or generic \`\`\`text\`\`\` blocks. After you output powershell-run, fileops, browser-actions, or web-search, Novayxk will execute them automatically and hand the result back to you for summarization, so do not ask the user to run commands manually, copy outputs, or send the result back. Also do not say "installation started", "wait for the result", or invent checks, execution outputs, conclusions, installed states, versions, or paths before the real execution result exists. fileops paths must stay relative to the current project. PowerShell commands run in the current project root by default, but when the user explicitly asks for system, software, web, or log tasks, those commands may access the required outside-project paths, network URLs, or Novayxk's own logs. Do not ask the user to reveal secrets.`;
   return `${behaviorBlock}${shellBlock}${memoryBlock}${taskBlock}`;
 }
 
@@ -351,7 +353,10 @@ function sanitizeChatAttachments(attachments: ChatMessage["attachments"]) {
 }
 
 export function isAbortPlaceholderMessage(message: ChatMessage) {
-  return message.role === "assistant" && message.content.trim() === STREAM_ABORT_PLACEHOLDER;
+  return (
+    message.role === "assistant" &&
+    /^(?:Generation stopped\.|已停止生成。)$/.test(message.content.trim())
+  );
 }
 
 export function normalizeAssistantToolCallContent(content: string) {
@@ -359,7 +364,7 @@ export function normalizeAssistantToolCallContent(content: string) {
 
   const toolCalls = [...content.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi)];
   const convertedBlocks = toolCalls
-    .map((match) => convertToolCallBlockToPowerShell(match[1] ?? ""))
+    .map((match) => convertToolCallBlock(match[1] ?? ""))
     .filter(Boolean);
 
   if (convertedBlocks.length) {
@@ -387,7 +392,7 @@ export function normalizeAssistantToolCallContent(content: string) {
 }
 
 export function stripPrematurePowerShellResultText(content: string) {
-  const blockPattern = /```(?:powershell-run|ps-run|shell-run)\n[\s\S]*?```/gi;
+  const blockPattern = /```(?:powershell-run|ps-run|shell-run|web-search)\n[\s\S]*?```/gi;
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null;
   while ((match = blockPattern.exec(content))) {
@@ -418,7 +423,7 @@ export function decodeToolCallText(value: string) {
     .replace(/&amp;/g, "&");
 }
 
-function convertToolCallBlockToPowerShell(rawBlock: string) {
+function convertToolCallBlock(rawBlock: string) {
   const decoded = decodeToolCallText(rawBlock).trim();
   if (!decoded) return "";
 
@@ -453,6 +458,20 @@ function convertToolCallBlockToPowerShell(rawBlock: string) {
 
     if (command.trim() && /^(?:shell|powershell|pwsh|cmd|terminal|bash|powershell-run|ps-run|shell-run)$/i.test(functionName)) {
       return `\`\`\`powershell-run\n${command.trim()}\n\`\`\``;
+    }
+
+    const query = typeof args?.query === "string" ? args.query.trim() : "";
+    if (query && /^(?:web[-_ ]?search|search[-_ ]?web|online[-_ ]?search|browser[-_ ]?search)$/i.test(functionName)) {
+      const request = normalizeWebSearchRequest({
+        query,
+        domains: Array.isArray(args?.domains) ? args.domains : undefined,
+        maxResults: args?.maxResults,
+        includePageContent: args?.includePageContent,
+        includePageContentCount: args?.includePageContentCount,
+      });
+      if (request) {
+        return `\`\`\`web-search\n${JSON.stringify(request, null, 2)}\n\`\`\``;
+      }
     }
   } catch {
     return "";
@@ -527,6 +546,21 @@ export function extractBrowserActions(content: string): BrowserAutomationAction[
   });
 }
 
+export function extractWebSearchRequests(content: string): WebSearchRequest[] {
+  const blocks = [...content.matchAll(/```(?:web-search|json)\n([\s\S]*?)```/gi)];
+  if (!blocks.length) return [];
+
+  return blocks.flatMap((block) => {
+    if (!isLikelyWebSearchBlock(block[0], block[1])) return [];
+    try {
+      const parsed = JSON.parse(block[1]);
+      return normalizeWebSearchPayload(parsed);
+    } catch {
+      return [];
+    }
+  });
+}
+
 export function getBrowserActionsParseIssue(content: string) {
   const hasOpenFence =
     /```browser-actions\n/i.test(content) ||
@@ -545,6 +579,22 @@ export function getBrowserActionsParseIssue(content: string) {
 
   const parsedActions = extractBrowserActions(content);
   if (!parsedActions.length) return "The code block exists, but the JSON is not a valid browser-actions payload.";
+  return "";
+}
+
+export function getWebSearchParseIssue(content: string) {
+  const hasOpenFence =
+    /```web-search\n/i.test(content) ||
+    /```json\n[\s\S]*?"query"\s*:\s*"/i.test(content);
+  if (!hasOpenFence) return "";
+
+  const closedBlocks = [...content.matchAll(/```(?:web-search|json)\n([\s\S]*?)```/gi)].filter((block) =>
+    isLikelyWebSearchBlock(block[0], block[1]),
+  );
+  if (!closedBlocks.length) return "The code block was not closed properly, which usually means the output stopped halfway.";
+
+  const parsedRequests = extractWebSearchRequests(content);
+  if (!parsedRequests.length) return "The code block exists, but the JSON is not a valid web-search payload.";
   return "";
 }
 
@@ -598,6 +648,11 @@ export function getAutomationRecoveryIssue(content: string) {
     return `There is a problem with the fileops block: ${fileOpsParseIssue}`;
   }
 
+  const webSearchParseIssue = getWebSearchParseIssue(content);
+  if (webSearchParseIssue) {
+    return `There is a problem with the web-search block: ${webSearchParseIssue}`;
+  }
+
   const looksLikeLegacyFileCreate =
     /"(?:operation|action)"\s*:\s*"(?:create|write|replace|delete|mkdir)"/i.test(content) &&
     /"path"\s*:\s*"/i.test(content) &&
@@ -619,6 +674,11 @@ function isLikelyBrowserActionsBlock(fenceSource: string, blockContent: string) 
   return /"(?:type|action)"\s*:\s*"(?:navigate|click|type|waitFor|pressKey|scrollTo|select|extractText|runScript)"/i.test(blockContent);
 }
 
+function isLikelyWebSearchBlock(fenceSource: string, blockContent: string) {
+  if (/^```web-search\b/i.test(fenceSource)) return true;
+  return /"query"\s*:\s*"/i.test(blockContent);
+}
+
 function normalizeBrowserActionsPayload(payload: unknown): BrowserAutomationAction[] {
   const candidates =
     Array.isArray(payload)
@@ -631,6 +691,55 @@ function normalizeBrowserActionsPayload(payload: unknown): BrowserAutomationActi
     const normalized = normalizeBrowserAction(candidate);
     return normalized ? [normalized] : [];
   });
+}
+
+function normalizeWebSearchPayload(payload: unknown): WebSearchRequest[] {
+  const candidates =
+    Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === "object" && Array.isArray((payload as { requests?: unknown[] }).requests)
+        ? (payload as { requests: unknown[] }).requests
+        : [payload];
+
+  return candidates.flatMap((candidate) => {
+    const normalized = normalizeWebSearchRequest(candidate);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function normalizeWebSearchRequest(value: unknown): WebSearchRequest | null {
+  if (!value || typeof value !== "object") return null;
+  const requestLike = value as Record<string, unknown>;
+  const query = typeof requestLike.query === "string" ? requestLike.query.trim() : "";
+  if (!query) return null;
+
+  const normalized: WebSearchRequest = {
+    query,
+  };
+
+  if (Array.isArray(requestLike.domains)) {
+    const domains = requestLike.domains
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    if (domains.length) normalized.domains = domains;
+  }
+
+  const maxResults = Number.parseInt(String(requestLike.maxResults ?? ""), 10);
+  if (Number.isFinite(maxResults) && maxResults > 0) {
+    normalized.maxResults = Math.min(8, maxResults);
+  }
+
+  if (typeof requestLike.includePageContent === "boolean") {
+    normalized.includePageContent = requestLike.includePageContent;
+  }
+
+  const includePageContentCount = Number.parseInt(String(requestLike.includePageContentCount ?? ""), 10);
+  if (Number.isFinite(includePageContentCount) && includePageContentCount >= 0) {
+    normalized.includePageContentCount = Math.min(3, includePageContentCount);
+  }
+
+  return normalized;
 }
 
 function normalizeBrowserAction(value: unknown): BrowserAutomationAction | null {

@@ -559,6 +559,7 @@ function App() {
     runtimePermissionContext,
     aiControlMode,
     assistantMode,
+    language,
     privilege,
     openBrowserWorkspace: () => {
       void openBrowserWorkspaceWindow();

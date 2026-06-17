@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld("novayxk", {
   getConfig: () => ipcRenderer.invoke("config:get"),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
   chat: (request) => ipcRenderer.invoke("ai:chat", request),
+  webSearch: (request) => ipcRenderer.invoke("web:search", request),
   chatStream: (request, handlers) =>
     new Promise((resolve, reject) => {
       const requestId = createRequestId();

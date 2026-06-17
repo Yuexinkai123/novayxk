@@ -1,13 +1,15 @@
 import React from "react";
+import type { AppLanguage } from "../vite-env";
 
-export function MarkdownView({ content }: { content: string }) {
+export function MarkdownView({ content, language = "en" }: { content: string; language?: AppLanguage }) {
+  const isChinese = language === "zh-CN";
   const blocks = parseMarkdownBlocks(content);
   return (
     <>
       {blocks.map((block, index) => {
         if (block.type === "code") {
           if (isCollapsibleShellBlock(block.language)) {
-            return <CollapsibleCodeBlock key={`code-${index}`} language={block.language} content={block.content} />;
+            return <CollapsibleCodeBlock key={`code-${index}`} language={block.language} content={block.content} isChinese={isChinese} />;
           }
           if (isCollapsibleOutputBlock(block.language, content, index)) {
             return (
@@ -15,7 +17,8 @@ export function MarkdownView({ content }: { content: string }) {
                 key={`code-${index}`}
                 language={block.language}
                 content={block.content}
-                forceLabel="Execution Output"
+                forceLabel={isChinese ? "执行结果" : "Execution Output"}
+                isChinese={isChinese}
               />
             );
           }
@@ -41,6 +44,31 @@ export function MarkdownView({ content }: { content: string }) {
           );
         }
 
+        if (block.type === "table") {
+          return (
+            <div key={`table-${index}`} className="markdown-table-shell">
+              <table className="markdown-table">
+                <thead>
+                  <tr>
+                    {block.headers.map((header, headerIndex) => (
+                      <th key={`table-header-${index}-${headerIndex}`}>{renderInlineMarkdown(header)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={`table-row-${index}-${rowIndex}`}>
+                      {row.map((cell, cellIndex) => (
+                        <td key={`table-cell-${index}-${rowIndex}-${cellIndex}`}>{renderInlineMarkdown(cell)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+
         return <p key={`paragraph-${index}`}>{renderInlineMarkdown(block.content)}</p>;
       })}
     </>
@@ -51,6 +79,7 @@ type MarkdownBlock =
   | { type: "paragraph"; content: string }
   | { type: "heading"; level: number; content: string }
   | { type: "list"; items: string[] }
+  | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "code"; language: string; content: string };
 
 function parseMarkdownBlocks(content: string): MarkdownBlock[] {
@@ -74,7 +103,8 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
     listItems = [];
   };
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const fence = line.match(/^```([A-Za-z][\w-]*)?\s*$/);
     if (fence) {
       if (isInCode) {
@@ -107,6 +137,27 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
       flushParagraph();
       flushList();
       blocks.push({ type: "heading", level: heading[1].length, content: heading[2].trim() });
+      continue;
+    }
+
+    if (looksLikeMarkdownTableHeader(line) && isMarkdownTableDivider(lines[lineIndex + 1] ?? "")) {
+      flushParagraph();
+      flushList();
+      const headerCells = splitMarkdownTableRow(line);
+      const rows: string[][] = [];
+      let rowIndex = lineIndex + 2;
+      while (rowIndex < lines.length) {
+        const rowLine = lines[rowIndex];
+        if (!looksLikeMarkdownTableRow(rowLine)) break;
+        rows.push(normalizeTableRow(splitMarkdownTableRow(rowLine), headerCells.length));
+        rowIndex += 1;
+      }
+      blocks.push({
+        type: "table",
+        headers: normalizeTableRow(headerCells, headerCells.length),
+        rows,
+      });
+      lineIndex = rowIndex - 1;
       continue;
     }
 
@@ -156,6 +207,38 @@ function renderInlineMarkdown(content: string) {
   return nodes;
 }
 
+function looksLikeMarkdownTableHeader(line: string) {
+  return splitMarkdownTableRow(line).length >= 2;
+}
+
+function looksLikeMarkdownTableRow(line: string) {
+  if (!line.trim()) return false;
+  return splitMarkdownTableRow(line).length >= 2;
+}
+
+function isMarkdownTableDivider(line: string) {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+}
+
+function splitMarkdownTableRow(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return [];
+  const normalized = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  return normalized
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter((cell, index, array) => !(array.length === 1 && !cell));
+}
+
+function normalizeTableRow(cells: string[], length: number) {
+  const normalized = cells.slice(0, length);
+  while (normalized.length < length) {
+    normalized.push("");
+  }
+  return normalized;
+}
+
 function isCollapsibleShellBlock(language: string) {
   return /^(?:powershell|powershell-run|ps-run|shell-run|pwsh|cmd|bat|bash|shell)$/i.test(language.trim());
 }
@@ -189,14 +272,16 @@ function CollapsibleCodeBlock({
   language,
   content,
   forceLabel,
+  isChinese,
 }: {
   language: string;
   content: string;
   forceLabel?: string;
+  isChinese: boolean;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const preview = React.useMemo(() => getCodePreview(content), [content]);
-  const label = React.useMemo(() => getCodeLanguageLabel(language, forceLabel), [forceLabel, language]);
+  const label = React.useMemo(() => getLocalizedCodeLanguageLabel(language, forceLabel, isChinese), [forceLabel, isChinese, language]);
 
   return (
     <div className={`markdown-code-shell ${expanded ? "expanded" : "collapsed"}`}>
@@ -204,11 +289,11 @@ function CollapsibleCodeBlock({
         type="button"
         className="markdown-code-toggle"
         onClick={() => setExpanded((value) => !value)}
-        title={expanded ? "Collapse command" : "Expand command"}
+        title={expanded ? (isChinese ? "收起命令" : "Collapse command") : isChinese ? "展开命令" : "Expand command"}
       >
         <span className="markdown-code-toggle-label">{label}</span>
         <span className="markdown-code-toggle-preview">{preview}</span>
-        <span className="markdown-code-toggle-icon">{expanded ? "Collapse" : "Expand"}</span>
+        <span className="markdown-code-toggle-icon">{expanded ? (isChinese ? "收起" : "Collapse") : isChinese ? "展开" : "Expand"}</span>
       </button>
       {expanded ? (
         <pre className="markdown-code">
@@ -217,4 +302,14 @@ function CollapsibleCodeBlock({
       ) : null}
     </div>
   );
+}
+
+function getLocalizedCodeLanguageLabel(language: string, forceLabel: string | undefined, isChinese: boolean) {
+  if (forceLabel) return forceLabel;
+  if (/^(?:powershell|powershell-run|ps-run|pwsh)$/i.test(language)) return "PowerShell";
+  if (/^(?:cmd|bat)$/i.test(language)) return "CMD";
+  if (/^(?:bash|shell|shell-run)$/i.test(language)) return isChinese ? "Shell" : "Shell";
+  if (/^browser-actions$/i.test(language)) return isChinese ? "浏览器动作" : "Browser Actions";
+  if (/^(?:text|plaintext)?$/i.test(language)) return isChinese ? "文本" : "Text";
+  return language || (isChinese ? "命令" : "Command");
 }

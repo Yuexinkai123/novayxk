@@ -14,6 +14,7 @@ const { createAiService } = require("./services/ai.cjs");
 const { getHeaderValue, isAbortError, requestBuffer } = require("./services/http.cjs");
 const { createProjectService } = require("./services/project.cjs");
 const { createInstallerService } = require("./services/installer.cjs");
+const { createWebSearchService } = require("./services/web-search.cjs");
 
 const isDev = !app.isPackaged;
 const NOVAYXK_HOME = path.join(os.homedir(), ".novayxk");
@@ -717,6 +718,10 @@ const installerService = createInstallerService({
   uninstallTargetArg,
   writeDebugLog,
   isDev,
+});
+const webSearchService = createWebSearchService({
+  logApp,
+  logError,
 });
 const {
   getInstallDirForUninstaller,
@@ -1806,6 +1811,7 @@ ipcMain.on("config:getInitialSync", (event) => {
 });
 ipcMain.handle("config:get", readConfig);
 ipcMain.handle("config:save", async (_event, config) => writeConfig(config));
+ipcMain.handle("web:search", async (_event, request) => webSearchService.search(request));
 
 ipcMain.handle("ai:chat", async (_event, request) => {
   const { provider, messages } = request;

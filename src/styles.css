@@ -1940,6 +1940,10 @@ body.is-resizing .resize-handle::before {
 .message-body p + p,
 .message-body p + ul,
 .message-body ul + p,
+.message-body p + .markdown-table-shell,
+.message-body ul + .markdown-table-shell,
+.message-body .markdown-table-shell + p,
+.message-body .markdown-table-shell + ul,
 .message-body .markdown-code + p,
 .message-body p + .markdown-code {
   margin-top: 10px;
@@ -2054,6 +2058,47 @@ body.is-resizing .resize-handle::before {
 
 .message-body .markdown-code-shell.expanded .markdown-code {
   margin-top: 8px;
+}
+
+.message-body .markdown-table-shell {
+  overflow-x: auto;
+  margin: 10px 0 0;
+  border: 1px solid rgba(173, 198, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.message-body .markdown-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.message-body .markdown-table th,
+.message-body .markdown-table td {
+  border-bottom: 1px solid rgba(173, 198, 255, 0.12);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-body .markdown-table th {
+  background: rgba(173, 198, 255, 0.08);
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.message-body .markdown-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.message-body .markdown-table td code,
+.message-body .markdown-table th code {
+  white-space: nowrap;
 }
 
 .message-attachments {
