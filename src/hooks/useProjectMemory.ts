@@ -23,7 +23,7 @@ export function useProjectMemory({
   const [memoryState, setMemoryState] = React.useState<ProjectMemoryState | null>(null);
   const [projectMemoryDraft, setProjectMemoryDraft] = React.useState("");
   const [activeTaskId, setActiveTaskId] = React.useState<string | null>(null);
-  const [activeTaskTitle, setActiveTaskTitle] = React.useState("新任务");
+  const [activeTaskTitle, setActiveTaskTitle] = React.useState("New task");
   const [activeTaskSummary, setActiveTaskSummary] = React.useState("");
   const activeTask = memoryState?.tasks.find((task) => task.id === activeTaskId) ?? null;
 
@@ -41,7 +41,7 @@ export function useProjectMemory({
       const cleanMessages = sanitizeChatHistory(messagesToSave);
       const task = await window.novayxk.saveTask({
         id: activeTaskId,
-        title: !activeTaskId && activeTaskTitle === "新任务" ? undefined : activeTaskTitle,
+        title: !activeTaskId && activeTaskTitle === "New task" ? undefined : activeTaskTitle,
         summary: activeTaskSummary || summarizeTaskForUi(cleanMessages),
         messages: cleanMessages,
       });
@@ -57,18 +57,18 @@ export function useProjectMemory({
   const saveCurrentTaskWithStatus = React.useCallback(async () => {
     try {
       const task = await saveCurrentTask(messages);
-      if (task) setStatus(`已保存任务历史：${task.title}`);
+      if (task) setStatus(`Task history saved: ${task.title}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "保存任务失败"));
+      setStatus(formatActionableError(error, "Failed to save the task"));
     }
   }, [messages, saveCurrentTask, setStatus]);
 
   const startNewTask = React.useCallback(async () => {
     setActiveTaskId(null);
-    setActiveTaskTitle("新任务");
+    setActiveTaskTitle("New task");
     setActiveTaskSummary("");
     setMessages(emptyMessages);
-    setStatus("已新建任务历史");
+    setStatus("Started a new task history");
   }, [setMessages, setStatus]);
 
   const loadTask = React.useCallback(
@@ -76,16 +76,16 @@ export function useProjectMemory({
       if (!taskId) return;
       try {
         if (!window.novayxk) {
-          throw new Error("当前在浏览器预览模式，任务历史需要用 Electron 启动。");
+          throw new Error("You are currently in browser preview mode. Task history requires the Electron app.");
         }
         const task = await window.novayxk.loadTask(taskId);
         setActiveTaskId(task.id);
         setActiveTaskTitle(task.title);
         setActiveTaskSummary(task.summary);
         setMessages(sanitizeChatHistory(task.messages));
-        setStatus(`已载入任务历史：${task.title}`);
+        setStatus(`Task history loaded: ${task.title}`);
       } catch (error) {
-        setStatus(formatActionableError(error, "载入任务失败"));
+        setStatus(formatActionableError(error, "Failed to load the task"));
       }
     },
     [setMessages, setStatus],
@@ -94,15 +94,15 @@ export function useProjectMemory({
   const saveProjectMemoryDraft = React.useCallback(async () => {
     try {
       if (!window.novayxk || !hasProject) {
-        throw new Error("请先打开一个项目。");
+        throw new Error("Open a project first.");
       }
       const state = await window.novayxk.saveProjectMemory(projectMemoryDraft);
       setMemoryState(state);
       setProjectMemoryDraft(state.memory);
       onMemorySaved();
-      setStatus("项目长期记忆已保存");
+      setStatus("Project long-term memory saved");
     } catch (error) {
-      setStatus(formatActionableError(error, "保存项目记忆失败"));
+      setStatus(formatActionableError(error, "Failed to save project memory"));
     }
   }, [hasProject, onMemorySaved, projectMemoryDraft, setStatus]);
 
@@ -122,7 +122,7 @@ export function useProjectMemory({
       }
     } else {
       setActiveTaskId(null);
-      setActiveTaskTitle("新任务");
+      setActiveTaskTitle("New task");
       setActiveTaskSummary("");
       setMessages(emptyMessages);
     }

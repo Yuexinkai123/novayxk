@@ -57,10 +57,10 @@ export function useWorkspaceActions({
   async function executeConfirmedCommand(confirmedCommand: string) {
     stopRequestedRef.current = false;
     setIsLoading(true);
-    setStatus("正在执行命令...");
+    setStatus("Running the command...");
     try {
       if (!window.novayxk) {
-        throw createDesktopBridgeUnavailableError("执行命令");
+        throw createDesktopBridgeUnavailableError("Running a command");
       }
       const inspection = await window.novayxk.inspectCommand(confirmedCommand);
       const needsAdminRestart = inspection.requiresAdmin && !privilege?.isAdmin && privilege?.canElevate;
@@ -82,10 +82,10 @@ export function useWorkspaceActions({
         await clearPendingAdminResume();
       }
       const confirmedSystemAction = inspection.requiresConfirmation
-        ? await confirmSystemAction(confirmedCommand, inspection.systemAction?.label ?? "系统动作", "manual")
+        ? await confirmSystemAction(confirmedCommand, inspection.systemAction?.label ?? "System action", "manual")
         : false;
       if (inspection.requiresConfirmation && !confirmedSystemAction) {
-        setStatus("已取消特殊系统动作");
+        setStatus("Cancelled the special system action");
         return;
       }
       const result = await window.novayxk.runCommandWithMode({
@@ -94,13 +94,13 @@ export function useWorkspaceActions({
         confirmedSystemAction,
       });
       if (stopRequestedRef.current) {
-        setStatus("已停止终端任务");
+        setStatus("Stopped the terminal task");
         return;
       }
       await syncProjectView();
-      setStatus(result.longRunning ? "命令已在终端任务中运行" : result.code === 0 ? "命令执行成功" : "命令执行失败，输出已保留");
+      setStatus(result.longRunning ? "The command is running as a terminal task" : result.code === 0 ? "Command completed successfully" : "Command failed, and the output was kept");
     } catch (error) {
-      setStatus(formatActionableError(error, "命令执行失败"));
+      setStatus(formatActionableError(error, "Command execution failed"));
     } finally {
       setIsLoading(false);
       stopRequestedRef.current = false;
@@ -109,11 +109,11 @@ export function useWorkspaceActions({
 
   function askApplyPatch() {
     if (!patchPreview) {
-      setStatus("没有可应用的补丁。");
+      setStatus("No patch is available to apply.");
       return;
     }
     if (!project) {
-      setStatus("请先打开一个项目。");
+      setStatus("Open a project first.");
       return;
     }
 
@@ -126,19 +126,19 @@ export function useWorkspaceActions({
 
   async function applyConfirmedPatch(patchText: string) {
     setIsLoading(true);
-    setStatus("正在应用补丁...");
+    setStatus("Applying the patch...");
     try {
       if (!window.novayxk) {
-        throw createDesktopBridgeUnavailableError("应用补丁");
+        throw createDesktopBridgeUnavailableError("Applying a patch");
       }
       const result = await window.novayxk.applyPatch(patchText);
       setCanUndoPatch(result.canUndo ?? true);
       await syncProjectView({
         preferredPath: selectedFile && result.changedFiles.includes(selectedFile.path) ? selectedFile.path : null,
       });
-      setStatus(`已应用补丁：${result.changedFiles.join(", ")}`);
+      setStatus(`Patch applied: ${result.changedFiles.join(", ")}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "应用补丁失败"));
+      setStatus(formatActionableError(error, "Failed to apply the patch"));
     } finally {
       setIsLoading(false);
     }
@@ -146,11 +146,11 @@ export function useWorkspaceActions({
 
   function askApplyFileOps() {
     if (!fileOpsPreview.length) {
-      setStatus("没有可执行的文件操作。");
+      setStatus("No file operations are available to run.");
       return;
     }
     if (!project) {
-      setStatus("请先打开一个项目。");
+      setStatus("Open a project first.");
       return;
     }
 
@@ -162,10 +162,10 @@ export function useWorkspaceActions({
 
   async function applyConfirmedFileOps(operations: FileOperation[]) {
     setIsLoading(true);
-    setStatus("正在执行文件操作...");
+    setStatus("Running file operations...");
     try {
       if (!window.novayxk) {
-        throw createDesktopBridgeUnavailableError("执行文件操作");
+        throw createDesktopBridgeUnavailableError("Running file operations");
       }
       const result = await window.novayxk.applyFileOps(operations);
       const firstWrittenFile =
@@ -174,9 +174,9 @@ export function useWorkspaceActions({
       await syncProjectView({
         preferredPath: selectedWasChanged ? selectedFile?.path ?? null : firstWrittenFile,
       });
-      setStatus(`已执行文件操作：${result.changedFiles.join(", ")}`);
+      setStatus(`File operations completed: ${result.changedFiles.join(", ")}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "执行文件操作失败"));
+      setStatus(formatActionableError(error, "Failed to run file operations"));
     } finally {
       setIsLoading(false);
     }
@@ -185,19 +185,19 @@ export function useWorkspaceActions({
   async function undoPatch() {
     if (!canUndoPatch || isLoading) return;
     setIsLoading(true);
-    setStatus("正在撤销上次补丁...");
+    setStatus("Undoing the last patch...");
     try {
       if (!window.novayxk) {
-        throw createDesktopBridgeUnavailableError("撤销补丁");
+        throw createDesktopBridgeUnavailableError("Undoing a patch");
       }
       const result = await window.novayxk.undoLastPatch();
       setCanUndoPatch(result.canUndo ?? false);
       await syncProjectView({
         preferredPath: selectedFile && result.restoredFiles.includes(selectedFile.path) ? selectedFile.path : null,
       });
-      setStatus(`已撤销补丁：${result.restoredFiles.join(", ")}`);
+      setStatus(`Patch undone: ${result.restoredFiles.join(", ")}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "撤销补丁失败"));
+      setStatus(formatActionableError(error, "Failed to undo the patch"));
     } finally {
       setIsLoading(false);
     }

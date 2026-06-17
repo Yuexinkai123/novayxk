@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -20,70 +20,70 @@
           </div>
         </div>
         <div class="hero-copy">
-          <h1>移除 Novayxk</h1>
-          <p>主程序、快捷方式和系统卸载入口会被清理。你可以决定是否同时删除 <code>.novayxk</code> 中的配置与任务历史。</p>
+          <h1>Remove Novayxk</h1>
+          <p>The app, shortcuts, and Windows uninstall entry will be removed. You can also choose whether to delete settings and task history from <code>.novayxk</code>.</p>
         </div>
         <div class="hero-metrics">
           <div class="hero-metric">
-            <strong>程序清理</strong>
-            <span>移除安装目录与入口</span>
+            <strong>App cleanup</strong>
+            <span>Remove the install folder and Windows entry</span>
           </div>
           <div class="hero-metric">
-            <strong>数据可选</strong>
-            <span>默认保留配置与历史</span>
+            <strong>Optional data removal</strong>
+            <span>Keeps settings and history by default</span>
           </div>
         </div>
       </aside>
 
       <section class="content-panel">
         <header class="window-bar window-drag">
-          <span id="windowTitle">Novayxk 卸载器</span>
+          <span id="windowTitle">Novayxk Uninstaller</span>
           <div class="window-actions no-drag">
-            <button id="minimizeButton" type="button" aria-label="最小化">_</button>
-            <button id="closeButton" type="button" aria-label="关闭">×</button>
+            <button id="minimizeButton" type="button" aria-label="Minimize">_</button>
+            <button id="closeButton" type="button" aria-label="Close">×</button>
           </div>
         </header>
 
         <div class="content-body">
-          <div class="kicker">卸载选项</div>
-          <h2>确认要移除的内容</h2>
-          <p class="subcopy">默认只删除程序本体，保留用户目录下的配置与历史数据。</p>
+          <div class="kicker">Uninstall options</div>
+          <h2>Confirm what to remove</h2>
+          <p class="subcopy">By default only the app is deleted while settings and history stay in your user directory.</p>
 
           <div class="card">
-            <span>安装目录</span>
+            <span>Install directory</span>
             <strong id="installDir">-</strong>
           </div>
           <div class="card subtle">
-            <span>用户数据</span>
+            <span>User data</span>
             <strong id="userDataDir">-</strong>
           </div>
 
           <label class="option-row">
             <input id="deleteUserData" type="checkbox" />
             <span>
-              <strong>同时删除用户数据</strong>
-              <small>删除 .novayxk 中的模型配置、项目记忆和任务历史</small>
+              <strong>Delete user data too</strong>
+              <small>Remove model settings, project memory, and task history from .novayxk</small>
             </span>
           </label>
 
           <div class="progress-panel">
             <div class="progress-header">
-              <strong id="progressTitle">等待开始</strong>
+              <strong id="progressTitle">Waiting to start</strong>
               <span id="progressPercent">0%</span>
             </div>
             <div class="progress-track" aria-hidden="true">
               <span id="progressFill" class="progress-fill"></span>
             </div>
-            <p id="progressDetail" class="progress-detail">点击“开始卸载”后会逐步清理进程、快捷方式和系统卸载入口。</p>
+            <p id="progressDetail" class="progress-detail">Click Start uninstall to clean running processes, shortcuts, and the Windows uninstall entry step by step.</p>
           </div>
 
           <p id="resultText" class="result-text"></p>
         </div>
 
         <footer class="actions">
-          <button id="secondaryButton" class="ghost-button" type="button">取消</button>
-          <button id="openUserDataButton" class="ghost-button" type="button">打开用户数据</button>
-          <button id="primaryButton" class="primary-button" type="button">开始卸载</button>
+          <button id="secondaryButton" class="ghost-button" type="button">Cancel</button>
+          <button id="openUserDataButton" class="ghost-button" type="button">Open user data</button>
+          <button id="primaryButton" class="primary-button" type="button">Start uninstall</button>
         </footer>
       </section>
     </main>

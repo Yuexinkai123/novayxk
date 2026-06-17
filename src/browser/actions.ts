@@ -46,15 +46,15 @@ export type BrowserAutomationAction =
     };
 
 export function getBrowserAutomationActionLabel(action: BrowserAutomationAction) {
-  if (action.type === "navigate") return `打开 ${action.url}`;
-  if (action.type === "click") return `点击 ${action.selector}`;
-  if (action.type === "type") return `输入 ${action.selector}`;
-  if (action.type === "waitFor") return `等待 ${action.selector}`;
-  if (action.type === "pressKey") return `按键 ${action.key}`;
-  if (action.type === "scrollTo") return action.selector ? `滚动到 ${action.selector}` : "滚动页面";
-  if (action.type === "select") return `选择 ${action.selector}`;
-  if (action.type === "extractText") return `提取 ${action.selector}`;
-  return "执行页面脚本";
+  if (action.type === "navigate") return `Open ${action.url}`;
+  if (action.type === "click") return `Click ${action.selector}`;
+  if (action.type === "type") return `Type into ${action.selector}`;
+  if (action.type === "waitFor") return `Wait for ${action.selector}`;
+  if (action.type === "pressKey") return `Press ${action.key}`;
+  if (action.type === "scrollTo") return action.selector ? `Scroll to ${action.selector}` : "Scroll page";
+  if (action.type === "select") return `Select ${action.selector}`;
+  if (action.type === "extractText") return `Extract ${action.selector}`;
+  return "Run page script";
 }
 
 export function isBrowserAutomationAction(value: unknown): value is BrowserAutomationAction {
@@ -144,7 +144,7 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
         ${createSelectorHelperScript()}
         const element = novayxkFindElement(${JSON.stringify(action.selector)});
         if (!element) {
-          throw new Error("没有找到可点击的元素：${escapeForDoubleQuotedMessage(action.selector)}");
+          throw new Error("No clickable element was found: ${escapeForDoubleQuotedMessage(action.selector)}");
         }
         const result = {
           ok: true,
@@ -170,11 +170,11 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
         ${createSelectorHelperScript()}
         const element = novayxkFindElement(${JSON.stringify(action.selector)});
         if (!element) {
-          throw new Error("没有找到可输入的元素：${escapeForDoubleQuotedMessage(action.selector)}");
+          throw new Error("No input element was found: ${escapeForDoubleQuotedMessage(action.selector)}");
         }
         const value = ${JSON.stringify(action.text)};
         if (!("value" in element)) {
-          throw new Error("目标元素不支持 value 写入：${escapeForDoubleQuotedMessage(action.selector)}");
+          throw new Error("The target element does not support value assignment: ${escapeForDoubleQuotedMessage(action.selector)}");
         }
         element.focus();
         element.value = value;
@@ -197,7 +197,7 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
         const key = ${JSON.stringify(action.key)};
         const element = ${action.selector ? `novayxkFindElement(${JSON.stringify(action.selector)})` : "document.activeElement || document.body"};
         if (!element) {
-          throw new Error("没有找到可接收按键的目标");
+          throw new Error("No target was found that can receive the key press.");
         }
         if (typeof element.focus === "function") {
           element.focus();
@@ -224,7 +224,7 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
         if (selector) {
           const element = novayxkFindElement(selector);
           if (!element) {
-            throw new Error("没有找到可滚动到的元素：" + selector);
+            throw new Error("No element was found to scroll to: " + selector);
           }
           element.scrollIntoView({ behavior, block: "center", inline: "nearest" });
           return {
@@ -253,10 +253,10 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
         ${createSelectorHelperScript()}
         const element = novayxkFindElement(${JSON.stringify(action.selector)});
         if (!element) {
-          throw new Error("没有找到可选择的元素：${escapeForDoubleQuotedMessage(action.selector)}");
+          throw new Error("No selectable element was found: ${escapeForDoubleQuotedMessage(action.selector)}");
         }
         if (!(element instanceof HTMLSelectElement)) {
-          throw new Error("目标元素不是 select：${escapeForDoubleQuotedMessage(action.selector)}");
+          throw new Error("The target element is not a select element: ${escapeForDoubleQuotedMessage(action.selector)}");
         }
         const value = ${JSON.stringify(action.value)};
         element.value = value;
@@ -280,7 +280,7 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
         const multiple = ${action.multiple === true ? "true" : "false"};
         const elements = novayxkFindElements(selector);
         if (!elements.length) {
-          throw new Error("没有找到可提取文本的元素：" + selector);
+          throw new Error("No element was found to extract text from: " + selector);
         }
         const texts = elements
           .map((element) => String(element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim())
@@ -332,7 +332,7 @@ export function createBrowserAutomationScript(action: BrowserAutomationAction) {
       });
       const timer = window.setTimeout(() => {
         observer.disconnect();
-        reject(new Error("等待元素超时：" + selector));
+        reject(new Error("Timed out while waiting for element: " + selector));
       }, timeoutMs);
     })
   `.trim();

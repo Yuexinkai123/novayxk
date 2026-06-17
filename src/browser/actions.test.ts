@@ -8,14 +8,14 @@ import {
 
 describe("browser automation action helpers", () => {
   it("returns readable labels for browser actions", () => {
-    expect(getBrowserAutomationActionLabel({ type: "navigate", url: "https://example.com" })).toBe("打开 https://example.com");
-    expect(getBrowserAutomationActionLabel({ type: "click", selector: ".submit" })).toBe("点击 .submit");
-    expect(getBrowserAutomationActionLabel({ type: "type", selector: "#email", text: "a@b.com" })).toBe("输入 #email");
-    expect(getBrowserAutomationActionLabel({ type: "waitFor", selector: ".done", timeoutMs: 1500 })).toBe("等待 .done");
-    expect(getBrowserAutomationActionLabel({ type: "pressKey", key: "Enter", selector: "#q" })).toBe("按键 Enter");
-    expect(getBrowserAutomationActionLabel({ type: "scrollTo", selector: "#result" })).toBe("滚动到 #result");
-    expect(getBrowserAutomationActionLabel({ type: "select", selector: "select[name=city]", value: "shanghai" })).toBe("选择 select[name=city]");
-    expect(getBrowserAutomationActionLabel({ type: "extractText", selector: ".result", multiple: true })).toBe("提取 .result");
+    expect(getBrowserAutomationActionLabel({ type: "navigate", url: "https://example.com" })).toBe("Open https://example.com");
+    expect(getBrowserAutomationActionLabel({ type: "click", selector: ".submit" })).toBe("Click .submit");
+    expect(getBrowserAutomationActionLabel({ type: "type", selector: "#email", text: "a@b.com" })).toBe("Type into #email");
+    expect(getBrowserAutomationActionLabel({ type: "waitFor", selector: ".done", timeoutMs: 1500 })).toBe("Wait for .done");
+    expect(getBrowserAutomationActionLabel({ type: "pressKey", key: "Enter", selector: "#q" })).toBe("Press Enter");
+    expect(getBrowserAutomationActionLabel({ type: "scrollTo", selector: "#result" })).toBe("Scroll to #result");
+    expect(getBrowserAutomationActionLabel({ type: "select", selector: "select[name=city]", value: "shanghai" })).toBe("Select select[name=city]");
+    expect(getBrowserAutomationActionLabel({ type: "extractText", selector: ".result", multiple: true })).toBe("Extract .result");
   });
 
   it("generates browser scripts for supported browser actions", () => {

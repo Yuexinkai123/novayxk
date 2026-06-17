@@ -1,43 +1,43 @@
 const MAX_SAFE_COMMAND_LENGTH = 12_000;
 const MAX_FULL_COMMAND_LENGTH = 50_000;
 const DANGEROUS_COMMANDS = [
-  { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+-[a-z]*[fdx][a-z]*)\b/i, reason: "会丢弃本地代码改动" },
-  { pattern: /\b(format|diskpart|shutdown|reboot)\b/i, reason: "可能影响系统或磁盘" },
-  { pattern: /\b(reg\s+delete|set-executionpolicy)\b/i, reason: "会修改系统级配置" },
-  { pattern: /\b(remove-item|rm|del|erase|rd|rmdir)\b[\s\S]*(?:-recurse|\/s)\b/i, reason: "包含递归删除" },
-  { pattern: /\b(remove-item|rm|del|erase|rd|rmdir)\b[\s\S]*(?:-recurse|\/s)\b[\s\S]*(?:-force|\/q)\b/i, reason: "包含递归强制删除" },
-  { pattern: /\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+(?:[/"']|~|\*)/i, reason: "包含高风险删除命令" },
-  { pattern: /\b(curl(?:\.exe)?|wget(?:\.exe)?|iwr|irm|invoke-webrequest|invoke-restmethod)\b[\s\S]*\|[\s\S]*(?:sh|bash|iex|invoke-expression)\b/i, reason: "会下载并直接执行远程脚本" },
+  { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+-[a-z]*[fdx][a-z]*)\b/i, reason: "This would discard local code changes." },
+  { pattern: /\b(format|diskpart|shutdown|reboot)\b/i, reason: "This may affect the system or disk." },
+  { pattern: /\b(reg\s+delete|set-executionpolicy)\b/i, reason: "This would modify system-level configuration." },
+  { pattern: /\b(remove-item|rm|del|erase|rd|rmdir)\b[\s\S]*(?:-recurse|\/s)\b/i, reason: "This includes recursive deletion." },
+  { pattern: /\b(remove-item|rm|del|erase|rd|rmdir)\b[\s\S]*(?:-recurse|\/s)\b[\s\S]*(?:-force|\/q)\b/i, reason: "This includes forced recursive deletion." },
+  { pattern: /\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+(?:[/"']|~|\*)/i, reason: "This includes a high-risk delete command." },
+  { pattern: /\b(curl(?:\.exe)?|wget(?:\.exe)?|iwr|irm|invoke-webrequest|invoke-restmethod)\b[\s\S]*\|[\s\S]*(?:sh|bash|iex|invoke-expression)\b/i, reason: "This would download and execute a remote script directly." },
 ];
 const SYSTEM_ACTION_COMMANDS = [
-  { action: "shutdown", label: "关机", pattern: /\b(shutdown(\.exe)?\s+\/s|stop-computer\b)\b/i },
-  { action: "restart", label: "重启", pattern: /\b(shutdown(\.exe)?\s+\/r|restart-computer\b|reboot\b)\b/i },
-  { action: "logout", label: "注销", pattern: /\b(shutdown(\.exe)?\s+\/l|logoff(\.exe)?\b)\b/i },
-  { action: "hibernate", label: "休眠", pattern: /\b(shutdown(\.exe)?\s+\/h|rundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\s+hibernate)\b/i },
-  { action: "sleep", label: "睡眠", pattern: /\brundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\b/i },
-  { action: "lock", label: "锁屏", pattern: /\brundll32(\.exe)?\s+user32\.dll,\s*lockworkstation\b/i },
+  { action: "shutdown", label: "Shut down", pattern: /\b(shutdown(\.exe)?\s+\/s|stop-computer\b)\b/i },
+  { action: "restart", label: "Restart", pattern: /\b(shutdown(\.exe)?\s+\/r|restart-computer\b|reboot\b)\b/i },
+  { action: "logout", label: "Sign out", pattern: /\b(shutdown(\.exe)?\s+\/l|logoff(\.exe)?\b)\b/i },
+  { action: "hibernate", label: "Hibernate", pattern: /\b(shutdown(\.exe)?\s+\/h|rundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\s+hibernate)\b/i },
+  { action: "sleep", label: "Sleep", pattern: /\brundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\b/i },
+  { action: "lock", label: "Lock screen", pattern: /\brundll32(\.exe)?\s+user32\.dll,\s*lockworkstation\b/i },
 ];
 const ADMIN_REQUIRED_COMMANDS = [
-  { label: "系统服务管理", pattern: /\b(?:sc(?:\.exe)?\s+(?:create|delete|config|start|stop)|new-service|set-service|start-service|stop-service|restart-service)\b/i },
-  { label: "注册表系统分支修改", pattern: /\breg(?:\.exe)?\s+(?:add|delete|import|restore|save|copy)\s+HK(?:LM|CR|U|CC)\\/i },
-  { label: "Windows 权限或防火墙修改", pattern: /\b(?:netsh\s+advfirewall|set-executionpolicy|bcdedit|takeown|icacls)\b/i },
-  { label: "系统目录写入", pattern: /\b(?:copy|move|remove-item|rm|del|mkdir|new-item|set-content|add-content)\b[\s\S]*(?:C:\\Windows|C:\\Program Files|C:\\ProgramData)/i },
-  { label: "软件包安装或卸载", pattern: /\b(?:winget|choco|scoop)\s+(?:install|uninstall|upgrade)|\b(?:install-package|uninstall-package|add-appxpackage|remove-appxpackage|msiexec(?:\.exe)?)\b/i },
-  { label: "进程强制结束", pattern: /\btaskkill(?:\.exe)?\b[\s\S]*\s\/f\b/i },
-  { label: "PowerShell 管理员启动", pattern: /\bstart-process\b[\s\S]*\b-verb\s+runas\b/i },
+  { label: "System service management", pattern: /\b(?:sc(?:\.exe)?\s+(?:create|delete|config|start|stop)|new-service|set-service|start-service|stop-service|restart-service)\b/i },
+  { label: "Registry changes under system hives", pattern: /\breg(?:\.exe)?\s+(?:add|delete|import|restore|save|copy)\s+HK(?:LM|CR|U|CC)\\/i },
+  { label: "Windows permissions or firewall changes", pattern: /\b(?:netsh\s+advfirewall|set-executionpolicy|bcdedit|takeown|icacls)\b/i },
+  { label: "Writing to system directories", pattern: /\b(?:copy|move|remove-item|rm|del|mkdir|new-item|set-content|add-content)\b[\s\S]*(?:C:\\Windows|C:\\Program Files|C:\\ProgramData)/i },
+  { label: "Software package install or uninstall", pattern: /\b(?:winget|choco|scoop)\s+(?:install|uninstall|upgrade)|\b(?:install-package|uninstall-package|add-appxpackage|remove-appxpackage|msiexec(?:\.exe)?)\b/i },
+  { label: "Force-stopping processes", pattern: /\btaskkill(?:\.exe)?\b[\s\S]*\s\/f\b/i },
+  { label: "PowerShell run as administrator", pattern: /\bstart-process\b[\s\S]*\b-verb\s+runas\b/i },
 ];
 
 function inspectCommand(command) {
   const normalized = String(command ?? "").trim();
   if (!normalized) {
-    return { allowed: false, reason: "命令为空。" };
+    return { allowed: false, reason: "The command is empty." };
   }
   const adminRequirement = detectAdminRequirement(normalized);
   const systemAction = detectSystemAction(normalized);
   if (systemAction) {
     return {
       allowed: false,
-      reason: `${systemAction.label}属于特殊系统动作，需要你手动确认。`,
+      reason: `${systemAction.label} is a special system action and requires your manual confirmation.`,
       requiresConfirmation: true,
       systemAction,
       ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
@@ -46,7 +46,7 @@ function inspectCommand(command) {
   if (normalized.length > MAX_SAFE_COMMAND_LENGTH) {
     return {
       allowed: false,
-      reason: `命令过长，安全模式下请控制在 ${MAX_SAFE_COMMAND_LENGTH} 字符内。`,
+      reason: `The command is too long. In safe mode, keep it within ${MAX_SAFE_COMMAND_LENGTH} characters.`,
       ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
     };
   }
@@ -70,14 +70,14 @@ function inspectCommand(command) {
 function inspectCommandForMode(command, controlMode = "safe") {
   const normalized = String(command ?? "").trim();
   if (!normalized) {
-    return { allowed: false, reason: "命令为空。" };
+    return { allowed: false, reason: "The command is empty." };
   }
   const adminRequirement = detectAdminRequirement(normalized);
   const systemAction = detectSystemAction(normalized);
   if (systemAction) {
     return {
       allowed: false,
-      reason: `${systemAction.label}属于特殊系统动作，需要你手动确认。`,
+      reason: `${systemAction.label} is a special system action and requires your manual confirmation.`,
       requiresConfirmation: true,
       systemAction,
       ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
@@ -86,7 +86,7 @@ function inspectCommandForMode(command, controlMode = "safe") {
   if (normalized.length > MAX_FULL_COMMAND_LENGTH) {
     return {
       allowed: false,
-      reason: `命令过长，请控制在 ${MAX_FULL_COMMAND_LENGTH} 字符内。`,
+      reason: `The command is too long. Keep it within ${MAX_FULL_COMMAND_LENGTH} characters.`,
       ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
     };
   }
@@ -94,7 +94,7 @@ function inspectCommandForMode(command, controlMode = "safe") {
   if (controlMode === "full") {
     return {
       allowed: true,
-      reason: "系统级执行已开启，高风险命令拦截已跳过。",
+      reason: "System-level execution is enabled, so high-risk command blocking was skipped.",
       ...(adminRequirement ? { requiresAdmin: true, adminReason: adminRequirement.label } : {}),
     };
   }

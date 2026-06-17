@@ -74,12 +74,12 @@ function requestBuffer(urlString, options = {}, redirectCount = 0) {
     try {
       parsed = new URL(urlString);
     } catch {
-      reject(new Error(`URL 无效：${urlString}`));
+      reject(new Error(`Invalid URL: ${urlString}`));
       return;
     }
 
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      reject(new Error(`仅支持 HTTP/HTTPS URL：${urlString}`));
+      reject(new Error(`Only HTTP/HTTPS URLs are supported: ${urlString}`));
       return;
     }
 
@@ -122,7 +122,7 @@ function requestBuffer(urlString, options = {}, redirectCount = 0) {
       res.on("data", (chunk) => {
         receivedBytes += chunk.length;
         if (receivedBytes > maxBytes) {
-          const error = new Error(`响应体过大，超过 ${maxBytes} 字节。`);
+          const error = new Error(`Response body is too large and exceeds ${maxBytes} bytes.`);
           settle(reject, error);
           req.destroy(error);
           res.destroy(error);

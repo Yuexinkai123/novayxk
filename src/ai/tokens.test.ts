@@ -17,9 +17,9 @@ describe("token usage estimates", () => {
     );
 
     expect(usage.totalTokens).toBe(usage.promptTokens + usage.completionTokens);
-    expect(formatTokenUsage(usage)).toContain("约 token");
-    expect(formatTokenUsage(usage)).toContain("输入");
-    expect(formatTokenUsage(usage)).toContain("输出");
+    expect(formatTokenUsage(usage)).toContain("Approx. tokens");
+    expect(formatTokenUsage(usage)).toContain("input");
+    expect(formatTokenUsage(usage)).toContain("output");
   });
 
   it("merges multiple token usage estimates", () => {

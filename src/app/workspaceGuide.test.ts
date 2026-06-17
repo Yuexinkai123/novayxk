@@ -36,6 +36,6 @@ describe("getWorkspaceGuideKind", () => {
   });
 
   it("returns a clear follow-up status after activating a starter prompt", () => {
-    expect(getGuidePromptStatus()).toContain("回车发送");
+    expect(getGuidePromptStatus()).toContain("press Enter");
   });
 });

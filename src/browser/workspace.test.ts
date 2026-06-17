@@ -53,10 +53,10 @@ describe("browser workspace helpers", () => {
         source: "user",
         type: "click",
         url: "https://example.com",
-        targetLabel: "登录按钮",
+        targetLabel: "Sign in button",
         createdAt: "2026-06-03T10:00:00.000Z",
       }),
-    ).toContain("点击元素");
+    ).toContain("Click element");
 
     expect(
       formatBrowserNetworkSummary({

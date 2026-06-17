@@ -63,21 +63,21 @@ function isSensitiveFile(filePath) {
 }
 
 function assertProjectFile(relativePath) {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
-  if (!relativePath || typeof relativePath !== "string") throw new Error("文件路径无效。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
+  if (!relativePath || typeof relativePath !== "string") throw new Error("Invalid file path.");
   const fullPath = path.resolve(activeProjectRoot, relativePath);
-  if (!isInsideProject(fullPath)) throw new Error("文件路径不在当前项目内。");
-  if (isSensitiveFile(fullPath)) throw new Error("该文件看起来包含敏感信息，已阻止操作。");
+  if (!isInsideProject(fullPath)) throw new Error("The file path is outside the current project.");
+  if (isSensitiveFile(fullPath)) throw new Error("This file appears to contain sensitive information, so the operation was blocked.");
   return fullPath;
 }
 
 function assertProjectPath(relativePath = "") {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
-  if (typeof relativePath !== "string") throw new Error("项目路径无效。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
+  if (typeof relativePath !== "string") throw new Error("Invalid project path.");
   const normalized = normalizeRelativeProjectPath(relativePath);
   const fullPath = normalized ? path.resolve(activeProjectRoot, normalized) : activeProjectRoot;
-  if (!isInsideProject(fullPath)) throw new Error("路径不在当前项目内。");
-  if (normalized && isSensitiveFile(fullPath)) throw new Error("该路径看起来包含敏感信息，已阻止操作。");
+  if (!isInsideProject(fullPath)) throw new Error("The path is outside the current project.");
+  if (normalized && isSensitiveFile(fullPath)) throw new Error("This path appears to contain sensitive information, so the operation was blocked.");
   return fullPath;
 }
 
@@ -136,7 +136,7 @@ function parseUnifiedPatch(patchText) {
 
     const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (hunkMatch) {
-      if (!current) throw new Error("补丁缺少文件头。");
+      if (!current) throw new Error("The patch is missing a file header.");
       currentHunk = {
         oldStart: Number(hunkMatch[1]),
         oldCount: Number(hunkMatch[2] ?? "1"),
@@ -188,7 +188,7 @@ function applyHunks(original, hunks) {
 
   for (const hunk of hunks) {
     const start = Math.max(hunk.oldStart - 1, 0);
-    if (start < cursor) throw new Error("补丁块位置重叠，无法安全应用。");
+    if (start < cursor) throw new Error("Patch hunks overlap and cannot be applied safely.");
     result.push(...originalLines.slice(cursor, start));
     cursor = start;
 
@@ -197,13 +197,13 @@ function applyHunks(original, hunks) {
       const text = hunkLine.slice(1);
       if (marker === " ") {
         if (originalLines[cursor] !== text) {
-          throw new Error(`补丁上下文不匹配：${text}`);
+          throw new Error(`Patch context did not match: ${text}`);
         }
         result.push(originalLines[cursor]);
         cursor += 1;
       } else if (marker === "-") {
         if (originalLines[cursor] !== text) {
-          throw new Error(`补丁删除行不匹配：${text}`);
+          throw new Error(`Patch deletion line did not match: ${text}`);
         }
         cursor += 1;
       } else if (marker === "+") {
@@ -254,7 +254,7 @@ async function buildDirectoryTree(relativePath = "") {
   const normalized = normalizeRelativeProjectPath(relativePath);
   const fullPath = assertProjectPath(normalized);
   const stat = await fs.stat(fullPath);
-  if (!stat.isDirectory()) throw new Error("路径不是文件夹。");
+  if (!stat.isDirectory()) throw new Error("The path is not a folder.");
   return {
     path: normalized,
     children: await buildTree(fullPath, 0, { maxDepth: 0 }),
@@ -262,7 +262,7 @@ async function buildDirectoryTree(relativePath = "") {
 }
 
 async function searchProjectFiles(query) {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   const term = String(query ?? "").trim().toLowerCase();
   if (!term) return [];
   const matches = [];
@@ -283,7 +283,7 @@ async function searchProjectFiles(query) {
 }
 
 async function readProjectContext(request = {}) {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   const selectedPath = normalizeRelativeProjectPath(request.selectedPath ?? "");
   const prompt = String(request.prompt ?? "");
   const projectFiles = [];
@@ -399,10 +399,10 @@ function isLikelyTextFile(fullPath, size) {
 }
 
 async function openProjectRoot(projectRoot) {
-  if (!projectRoot || typeof projectRoot !== "string") throw new Error("项目路径无效。");
+  if (!projectRoot || typeof projectRoot !== "string") throw new Error("Invalid project path.");
   const resolvedRoot = path.resolve(projectRoot);
   const stat = await fs.stat(resolvedRoot);
-  if (!stat.isDirectory()) throw new Error("项目路径不是文件夹。");
+  if (!stat.isDirectory()) throw new Error("The project path is not a folder.");
   activeProjectRoot = resolvedRoot;
   setMainActiveProjectRoot(activeProjectRoot);
   logApp("project:opened", { projectRoot: activeProjectRoot });

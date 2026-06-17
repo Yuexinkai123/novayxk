@@ -19,7 +19,7 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error:
     if (this.state.error) {
       return (
         <main className="renderer-error">
-          <h1>界面加载失败</h1>
+          <h1>Failed to load the interface</h1>
           <p>{this.state.error.message}</p>
         </main>
       );
@@ -32,7 +32,7 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error:
 window.addEventListener("error", (event) => {
   const root = document.getElementById("root");
   if (!root || root.childElementCount) return;
-  root.innerHTML = `<main class="renderer-error"><h1>界面加载失败</h1><p>${String(event.error?.message || event.message || "未知错误")}</p></main>`;
+  root.innerHTML = `<main class="renderer-error"><h1>Failed to load the interface</h1><p>${String(event.error?.message || event.message || "Unknown error")}</p></main>`;
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

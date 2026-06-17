@@ -28,13 +28,13 @@ export function inspectCommandLoop(commands: PowerShellCommandRequest[], state: 
   for (const normalized of normalizedCommands) {
     const count = state.seenCommands.get(normalized) ?? 0;
     if (count >= COMMAND_LOOP_REPEAT_LIMIT) {
-      return { shouldStop: true, reason: "检测到同一条命令反复出现，可能陷入重复尝试。" };
+      return { shouldStop: true, reason: "The same command kept repeating, which suggests a retry loop." };
     }
   }
 
   const signatureCount = state.seenSignatures.get(signature) ?? 0;
   if (signature && signatureCount >= COMMAND_LOOP_REPEAT_LIMIT) {
-    return { shouldStop: true, reason: "检测到连续步骤的命令组合反复出现，可能陷入循环。" };
+    return { shouldStop: true, reason: "The same sequence of commands kept repeating, which suggests a loop." };
   }
 
   for (const normalized of normalizedCommands) {
@@ -105,7 +105,7 @@ export function isLikelyStandalonePowerShellCommand(line: string) {
   if (/[\u4e00-\u9fa5]/.test(line)) return false;
   if (/[。！？]/.test(line)) return false;
   if (/^(?:\$|PS>|>|`|-|\d+\.|\*)\s*/.test(line)) return false;
-  if (/^PowerShell\s+执行结果/i.test(line)) return false;
+  if (/^PowerShell\s+(?:execution output|result)/i.test(line)) return false;
 
   const commandPrefix =
     /^(?:winget|choco|scoop|npm|pnpm|yarn|npx|node|python|py|pip|git|docker|wsl|mysql|where(?:\.exe)?|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|curl(?:\.exe)?|wget(?:\.exe)?|Find-Package|Install-Package|Uninstall-Package|Get-Package|Get-[A-Za-z]+|Set-[A-Za-z]+|New-[A-Za-z]+|Remove-[A-Za-z]+|Start-[A-Za-z]+|Stop-[A-Za-z]+|Restart-[A-Za-z]+|Test-[A-Za-z]+|Select-[A-Za-z]+|Get-ChildItem|Get-Service|Start-Process|Stop-Process|shutdown(?:\.exe)?|taskkill(?:\.exe)?|reg(?:\.exe)?|msiexec(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)\b/i;
@@ -125,10 +125,10 @@ export function formatTerminalStatus(task: {
   needsInput?: boolean;
   userIntervened?: boolean;
 }) {
-  const suffix = task.userIntervened ? " · 已介入" : "";
-  if (task.status === "running" && task.needsInput) return `等待输入${suffix}`;
-  if (task.status === "running") return `运行中${suffix}`;
-  if (task.status === "stopped") return `已停止${suffix}`;
-  if (task.status === "failed") return `${`失败 ${task.code ?? ""}`.trim()}${suffix}`;
-  return `退出 ${task.code ?? 0}${suffix}`;
+  const suffix = task.userIntervened ? " · Intervened" : "";
+  if (task.status === "running" && task.needsInput) return `Waiting for input${suffix}`;
+  if (task.status === "running") return `Running${suffix}`;
+  if (task.status === "stopped") return `Stopped${suffix}`;
+  if (task.status === "failed") return `${`Failed ${task.code ?? ""}`.trim()}${suffix}`;
+  return `Exited ${task.code ?? 0}${suffix}`;
 }

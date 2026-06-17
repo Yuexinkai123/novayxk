@@ -63,7 +63,7 @@ export function useTerminalTasks({
       setTerminalTasks(tasks);
       setActiveTerminalTaskId((current) => current ?? tasks[0]?.id ?? null);
     } catch (error) {
-      setStatus(formatActionableError(error, "读取终端任务失败"));
+      setStatus(formatActionableError(error, "Failed to load terminal tasks"));
     }
   }, [setStatus]);
 
@@ -83,11 +83,11 @@ export function useTerminalTasks({
   const startTerminalTask = React.useCallback(async () => {
     const command = terminalCommand.trim();
     if (!command) {
-      setStatus("请输入要启动的终端命令。");
+      setStatus("Enter a terminal command to start.");
       return;
     }
     if (!window.novayxk) {
-      setStatus(getDesktopBridgeUnavailableMessage("启动终端任务"));
+      setStatus(getDesktopBridgeUnavailableMessage("Starting a terminal task"));
       return;
     }
 
@@ -112,10 +112,10 @@ export function useTerminalTasks({
         await clearPendingAdminResume();
       }
       const confirmedSystemAction = inspection.requiresConfirmation
-        ? await confirmSystemAction(command, inspection.systemAction?.label ?? "系统动作", "manual")
+        ? await confirmSystemAction(command, inspection.systemAction?.label ?? "System action", "manual")
         : false;
       if (inspection.requiresConfirmation && !confirmedSystemAction) {
-        setStatus("已取消特殊系统动作");
+        setStatus("Cancelled the special system action");
         return;
       }
       const task = await window.novayxk.startTerminalTask({
@@ -125,9 +125,9 @@ export function useTerminalTasks({
       });
       upsertTerminalTask(task);
       setActiveTerminalTaskId(task.id);
-      setStatus(`终端任务已启动：${task.title}`);
+      setStatus(`Terminal task started: ${task.title}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "启动终端任务失败"));
+      setStatus(formatActionableError(error, "Failed to start the terminal task"));
     }
   }, [
     aiControlMode,
@@ -147,9 +147,9 @@ export function useTerminalTasks({
     try {
       const task = await window.novayxk.stopTerminalTask(activeTerminalTask.id);
       upsertTerminalTask(task);
-      setStatus(`正在停止终端任务：${task.title}`);
+      setStatus(`Stopping terminal task: ${task.title}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "停止终端任务失败"));
+      setStatus(formatActionableError(error, "Failed to stop the terminal task"));
     }
   }, [activeTerminalTask, setStatus, upsertTerminalTask]);
 
@@ -159,9 +159,9 @@ export function useTerminalTasks({
       const task = await window.novayxk.restartTerminalTask(activeTerminalTask.id);
       upsertTerminalTask(task);
       setActiveTerminalTaskId(task.id);
-      setStatus(`终端任务已重启：${task.title}`);
+      setStatus(`Terminal task restarted: ${task.title}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "重启终端任务失败"));
+      setStatus(formatActionableError(error, "Failed to restart the terminal task"));
     }
   }, [activeTerminalTask, setStatus, upsertTerminalTask]);
 
@@ -169,9 +169,9 @@ export function useTerminalTasks({
     if (!activeTerminalTask?.output) return;
     try {
       await navigator.clipboard.writeText(activeTerminalTask.output);
-      setStatus("终端输出已复制");
+      setStatus("Terminal output copied");
     } catch {
-      setStatus("复制终端输出失败");
+      setStatus("Failed to copy terminal output");
     }
   }, [activeTerminalTask, setStatus]);
 

@@ -11,6 +11,10 @@ export type ProviderConfig = {
 
 export type ThemeMode = "dark" | "light";
 
+export type AppLanguage = "en" | "zh-CN";
+
+export type LanguagePreferenceSource = "system" | "user";
+
 export type AiControlMode = "safe" | "full";
 
 export type AssistantMode = "low" | "standard" | "deep";
@@ -39,6 +43,8 @@ export type AppConfig = {
   providers: ProviderConfig[];
   activeProviderId: string | null;
   lastProjectRoot?: string | null;
+  language?: AppLanguage;
+  languagePreferenceSource?: LanguagePreferenceSource;
   theme?: ThemeMode;
   aiControlMode?: AiControlMode;
   assistantMode?: AssistantMode;

@@ -63,7 +63,7 @@ function runExecutable(command, args) {
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(output.trim() || `${command} 退出码 ${code}`));
+        reject(new Error(output.trim() || `${command} exited with code ${code}`));
       }
     });
   });
@@ -101,10 +101,10 @@ async function isRunningAsAdmin() {
 
 async function restartAsAdmin() {
   if (process.platform !== "win32") {
-    throw new Error("当前系统不支持 Windows UAC。请在 Windows 桌面版中使用管理员模式。");
+    throw new Error("This system does not support Windows UAC. Please use administrator mode in the Windows desktop app.");
   }
   if (isDev) {
-    throw new Error("开发模式下不能可靠地切换管理员模式，请先用打包后的桌面版测试。");
+    throw new Error("Administrator mode cannot be switched reliably in development mode. Please test it in the packaged desktop app first.");
   }
 
   const exePath = process.execPath;
@@ -139,12 +139,12 @@ async function restartAsAdmin() {
 function formatElevationError(error) {
   const message = String(error?.message || "");
   if (/operation was canceled by the user|已被用户取消|拒绝访问|cancelled by the user/i.test(message)) {
-    return new Error("管理员模式没有启动，因为 Windows UAC 授权被取消了。请重新点击“管理员模式”，并在弹窗里选择“是”。");
+    return new Error('Windows UAC approval was canceled. Click "Administrator mode" again and choose "Yes" in the system prompt.');
   }
   if (/Start-Process/i.test(message) || /runas/i.test(message)) {
-    return new Error("管理员模式没有成功启动。请确认当前桌面会话允许弹出 UAC 窗口，然后重试。");
+    return new Error("Administrator mode did not start successfully. Make sure the current desktop session allows UAC prompts, then try again.");
   }
-  return error instanceof Error ? error : new Error("管理员模式启动失败。");
+  return error instanceof Error ? error : new Error("Failed to start administrator mode.");
 }
 
 async function closeRunningInstalledApp() {
@@ -199,7 +199,7 @@ async function findCleanupHelper() {
   for (const candidate of candidates) {
     if (candidate && (await pathExists(candidate))) return candidate;
   }
-  throw new Error(`没有找到 ${CLEANUP_EXE}，请重新打包安装。`);
+  throw new Error(`${CLEANUP_EXE} was not found. Please rebuild the installer package.`);
 }
 
 async function launchCleanupHelper({ installDir, deleteUserData, userDataDir }) {

@@ -66,7 +66,7 @@ const BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS = 12_000;
 const BROWSER_TRACE_PREVIEW_BYTES = 80_000;
 const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024;
 const IMAGE_GENERATION_TIMEOUT_MS = 10 * 60 * 1000;
-const IMAGE_GENERATION_ABORT_MESSAGE = "用户已停止本次生成。";
+const IMAGE_GENERATION_ABORT_MESSAGE = "The current generation was stopped by the user.";
 const TEXT_FILE_EXTENSIONS = new Set([
   ".cjs",
   ".css",
@@ -94,29 +94,44 @@ const TEXT_FILE_EXTENSIONS = new Set([
   ".yml",
 ]);
 const DANGEROUS_COMMANDS = [
-  { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+-[a-z]*[fdx][a-z]*)\b/i, reason: "会丢弃本地代码改动" },
-  { pattern: /\b(format|diskpart|shutdown|reboot)\b/i, reason: "可能影响系统或磁盘" },
-  { pattern: /\b(reg\s+delete|set-executionpolicy)\b/i, reason: "会修改系统级配置" },
-  { pattern: /\b(remove-item|rm|del|erase|rd|rmdir)\b[\s\S]*(?:-recurse|\/s)\b[\s\S]*(?:-force|\/q)\b/i, reason: "包含递归强制删除" },
-  { pattern: /\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+(?:[/"']|~|\*)/i, reason: "包含高风险删除命令" },
-  { pattern: /\b(curl(?:\.exe)?|wget(?:\.exe)?|iwr|irm|invoke-webrequest|invoke-restmethod)\b[\s\S]*\|[\s\S]*(?:sh|bash|iex|invoke-expression)\b/i, reason: "会下载并直接执行远程脚本" },
+  { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+-[a-z]*[fdx][a-z]*)\b/i, reason: "This would discard local code changes." },
+  { pattern: /\b(format|diskpart|shutdown|reboot)\b/i, reason: "This may affect the system or disk." },
+  { pattern: /\b(reg\s+delete|set-executionpolicy)\b/i, reason: "This would modify system-level configuration." },
+  { pattern: /\b(remove-item|rm|del|erase|rd|rmdir)\b[\s\S]*(?:-recurse|\/s)\b[\s\S]*(?:-force|\/q)\b/i, reason: "This includes forced recursive deletion." },
+  { pattern: /\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+(?:[/"']|~|\*)/i, reason: "This includes a high-risk delete command." },
+  { pattern: /\b(curl(?:\.exe)?|wget(?:\.exe)?|iwr|irm|invoke-webrequest|invoke-restmethod)\b[\s\S]*\|[\s\S]*(?:sh|bash|iex|invoke-expression)\b/i, reason: "This would download and execute a remote script directly." },
 ];
 const SYSTEM_ACTION_COMMANDS = [
-  { action: "shutdown", label: "关机", pattern: /\b(shutdown(\.exe)?\s+\/s|stop-computer\b)\b/i },
-  { action: "restart", label: "重启", pattern: /\b(shutdown(\.exe)?\s+\/r|restart-computer\b|reboot\b)\b/i },
-  { action: "logout", label: "注销", pattern: /\b(shutdown(\.exe)?\s+\/l|logoff(\.exe)?\b)\b/i },
-  { action: "hibernate", label: "休眠", pattern: /\b(shutdown(\.exe)?\s+\/h|rundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\s+hibernate)\b/i },
-  { action: "sleep", label: "睡眠", pattern: /\brundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\b/i },
-  { action: "lock", label: "锁屏", pattern: /\brundll32(\.exe)?\s+user32\.dll,\s*lockworkstation\b/i },
+  { action: "shutdown", label: "Shut down", pattern: /\b(shutdown(\.exe)?\s+\/s|stop-computer\b)\b/i },
+  { action: "restart", label: "Restart", pattern: /\b(shutdown(\.exe)?\s+\/r|restart-computer\b|reboot\b)\b/i },
+  { action: "logout", label: "Sign out", pattern: /\b(shutdown(\.exe)?\s+\/l|logoff(\.exe)?\b)\b/i },
+  { action: "hibernate", label: "Hibernate", pattern: /\b(shutdown(\.exe)?\s+\/h|rundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\s+hibernate)\b/i },
+  { action: "sleep", label: "Sleep", pattern: /\brundll32(\.exe)?\s+powrprof\.dll,\s*setsuspendstate\b/i },
+  { action: "lock", label: "Lock screen", pattern: /\brundll32(\.exe)?\s+user32\.dll,\s*lockworkstation\b/i },
 ];
+
+function normalizeSystemLanguage(value) {
+  return /^zh(?:[-_]|$)/i.test(String(value || "").trim()) ? "zh-CN" : "en";
+}
+
+function detectSystemLanguage() {
+  const preferredLanguages = typeof app.getPreferredSystemLanguages === "function"
+    ? app.getPreferredSystemLanguages()
+    : [];
+  const candidates = Array.isArray(preferredLanguages) ? preferredLanguages.filter(Boolean) : [];
+  if (typeof app.getLocale === "function") {
+    candidates.push(app.getLocale());
+  }
+  return normalizeSystemLanguage(candidates[0] || "en");
+}
 const ADMIN_REQUIRED_COMMANDS = [
-  { label: "系统服务管理", pattern: /\b(?:sc(?:\.exe)?\s+(?:create|delete|config|start|stop)|new-service|set-service|start-service|stop-service|restart-service)\b/i },
-  { label: "注册表系统分支修改", pattern: /\breg(?:\.exe)?\s+(?:add|delete|import|restore|save|copy)\s+HK(?:LM|CR|U|CC)\\/i },
-  { label: "Windows 权限或防火墙修改", pattern: /\b(?:netsh\s+advfirewall|set-executionpolicy|bcdedit|takeown|icacls)\b/i },
-  { label: "系统目录写入", pattern: /\b(?:copy|move|remove-item|rm|del|mkdir|new-item|set-content|add-content)\b[\s\S]*(?:C:\\Windows|C:\\Program Files|C:\\ProgramData)/i },
-  { label: "软件包安装或卸载", pattern: /\b(?:winget|choco|scoop)\s+(?:install|uninstall|upgrade)|\b(?:install-package|uninstall-package|add-appxpackage|remove-appxpackage|msiexec(?:\.exe)?)\b/i },
-  { label: "进程强制结束", pattern: /\btaskkill(?:\.exe)?\b[\s\S]*\s\/f\b/i },
-  { label: "PowerShell 管理员启动", pattern: /\bstart-process\b[\s\S]*\b-verb\s+runas\b/i },
+  { label: "System service management", pattern: /\b(?:sc(?:\.exe)?\s+(?:create|delete|config|start|stop)|new-service|set-service|start-service|stop-service|restart-service)\b/i },
+  { label: "Registry changes under system hives", pattern: /\breg(?:\.exe)?\s+(?:add|delete|import|restore|save|copy)\s+HK(?:LM|CR|U|CC)\\/i },
+  { label: "Windows permissions or firewall changes", pattern: /\b(?:netsh\s+advfirewall|set-executionpolicy|bcdedit|takeown|icacls)\b/i },
+  { label: "Writing to system directories", pattern: /\b(?:copy|move|remove-item|rm|del|mkdir|new-item|set-content|add-content)\b[\s\S]*(?:C:\\Windows|C:\\Program Files|C:\\ProgramData)/i },
+  { label: "Software package install or uninstall", pattern: /\b(?:winget|choco|scoop)\s+(?:install|uninstall|upgrade)|\b(?:install-package|uninstall-package|add-appxpackage|remove-appxpackage|msiexec(?:\.exe)?)\b/i },
+  { label: "Force-stopping processes", pattern: /\btaskkill(?:\.exe)?\b[\s\S]*\s\/f\b/i },
+  { label: "PowerShell run as administrator", pattern: /\bstart-process\b[\s\S]*\b-verb\s+runas\b/i },
 ];
 
 protocol.registerSchemesAsPrivileged([
@@ -340,7 +355,7 @@ function normalizeBrowserUrl(input) {
 }
 
 function getMainWebContents() {
-  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("主窗口不可用。");
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("The main window is unavailable.");
   return mainWindow.webContents;
 }
 
@@ -366,7 +381,7 @@ function isInsideDirectory(parentDir, targetPath) {
 function assertGeneratedImageFile(imagePath) {
   const targetPath = path.resolve(String(imagePath || ""));
   if (!isInsideDirectory(GENERATED_IMAGES_DIR, targetPath)) {
-    throw new Error("图片路径无效。");
+    throw new Error("Invalid image path.");
   }
   return targetPath;
 }
@@ -411,18 +426,18 @@ async function ensureUniqueProjectImagePath(relativePath) {
       throw error;
     }
   }
-  throw new Error("图片文件名冲突过多，请手动指定文件名。");
+  throw new Error("Too many image filename conflicts. Please specify a filename manually.");
 }
 
 function resolveGeneratedImageProtocolPath(requestUrl) {
   const parsed = new URL(requestUrl);
   const rawRelative = decodeURIComponent(`${parsed.hostname}${parsed.pathname}`).replace(/^\/+/, "");
   if (!rawRelative) {
-    throw new Error("图片地址无效。");
+    throw new Error("Invalid image URL.");
   }
   const targetPath = path.resolve(GENERATED_IMAGES_DIR, rawRelative);
   if (!isInsideDirectory(GENERATED_IMAGES_DIR, targetPath)) {
-    throw new Error("图片地址越界。");
+    throw new Error("The image URL is outside the allowed range.");
   }
   return targetPath;
 }
@@ -439,7 +454,7 @@ function resolveProjectProtocolPath(requestUrl) {
   const parsed = new URL(requestUrl);
   const rawRelative = decodeURIComponent(`${parsed.hostname}${parsed.pathname}`).replace(/^\/+/, "");
   if (!rawRelative) {
-    throw new Error("项目文件地址无效。");
+    throw new Error("Invalid project file URL.");
   }
   return assertProjectFile(rawRelative);
 }
@@ -519,7 +534,7 @@ async function downloadGeneratedImageUrl(url, timeoutMs = IMAGE_GENERATION_TIMEO
       maxBytes: MAX_GENERATED_IMAGE_BYTES + 1,
     });
     if (!response.ok) {
-      throw new Error(`下载生成图片失败：${response.status}`);
+      throw new Error(`Failed to download the generated image: ${response.status}`);
     }
     return {
       buffer: response.body,
@@ -527,7 +542,7 @@ async function downloadGeneratedImageUrl(url, timeoutMs = IMAGE_GENERATION_TIMEO
     };
   } catch (error) {
     if (isAbortError(error)) {
-      throw new Error("下载生成图片超时，请检查网络或供应商状态。");
+      throw new Error("Timed out while downloading the generated image. Check the network connection or provider status.");
     }
     throw error;
   } finally {
@@ -551,14 +566,14 @@ async function readGeneratedImageBytes(item, options = {}) {
     return downloadGeneratedImageUrl(item.url, options.timeoutMs ?? IMAGE_GENERATION_TIMEOUT_MS);
   }
 
-  throw new Error("图片生成结果缺少 b64_json 或 url。");
+  throw new Error("The image generation result is missing b64_json or url.");
 }
 
 async function saveGeneratedImageItem(item, prompt, index, options = {}) {
   const { buffer, mimeType } = await readGeneratedImageBytes(item, options);
-  if (!buffer.length) throw new Error("图片生成结果为空。");
+  if (!buffer.length) throw new Error("The image generation result is empty.");
   if (buffer.length > MAX_GENERATED_IMAGE_BYTES) {
-    throw new Error("生成图片过大，已拒绝保存。");
+    throw new Error("The generated image is too large and was not saved.");
   }
 
   await fs.mkdir(GENERATED_IMAGES_DIR, { recursive: true });
@@ -670,6 +685,7 @@ const { readConfig, readConfigSync, writeConfig } = createConfigService({
   configFile: CONFIG_FILE,
   logApp,
   safeStorage,
+  getDefaultLanguage: detectSystemLanguage,
 });
 const memoryService = createMemoryService({
   projectsDir: PROJECTS_DIR,
@@ -872,7 +888,7 @@ function markBrowserWorkspaceReady() {
 
 function waitForBrowserWorkspaceReady(targetWindow, timeoutMs = BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS) {
   if (!targetWindow || targetWindow.isDestroyed()) {
-    return Promise.reject(new Error("浏览器工作区窗口不可用"));
+    return Promise.reject(new Error("The browser workspace window is unavailable."));
   }
   if (browserWorkspaceReady) {
     return Promise.resolve();
@@ -881,7 +897,7 @@ function waitForBrowserWorkspaceReady(targetWindow, timeoutMs = BROWSER_WORKSPAC
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error("浏览器工作区窗口启动超时"));
+      reject(new Error("Timed out while starting the browser workspace window."));
     }, timeoutMs);
     const cleanup = () => {
       clearTimeout(timeout);
@@ -895,11 +911,11 @@ function waitForBrowserWorkspaceReady(targetWindow, timeoutMs = BROWSER_WORKSPAC
     };
     const onFailed = (_event, _errorCode, errorDescription) => {
       cleanup();
-      reject(new Error(errorDescription || "浏览器工作区窗口加载失败"));
+      reject(new Error(errorDescription || "Failed to load the browser workspace window."));
     };
     const onClosed = () => {
       cleanup();
-      reject(new Error("浏览器工作区窗口已关闭"));
+      reject(new Error("The browser workspace window was closed."));
     };
     browserWorkspaceReadyResolvers.add(onReady);
     targetWindow.webContents.once("did-fail-load", onFailed);
@@ -984,16 +1000,16 @@ ipcMain.handle("uninstall:run", async (event, request) => {
     installDir,
     deleteUserData: request?.deleteUserData === true,
   });
-  emitUninstallProgress(event.sender, 6, "检查安装目录", installDir);
+  emitUninstallProgress(event.sender, 6, "Checking install directory", installDir);
   if (!(await pathExists(path.join(installDir, APP_EXE)))) {
-    throw new Error(`没有在这里找到 ${APP_EXE}：${installDir}`);
+    throw new Error(`${APP_EXE} was not found here: ${installDir}`);
   }
 
-  emitUninstallProgress(event.sender, 22, "关闭运行中的 Novayxk", "正在释放被占用的文件");
+  emitUninstallProgress(event.sender, 22, "Closing running Novayxk processes", "Releasing files that are still in use");
   await closeRunningInstalledApp();
-  emitUninstallProgress(event.sender, 48, "清理快捷方式", "桌面和开始菜单入口");
+  emitUninstallProgress(event.sender, 48, "Removing shortcuts", "Desktop and Start menu entries");
   await removeShellArtifacts();
-  emitUninstallProgress(event.sender, 72, "清理系统卸载入口", "Windows 应用和功能");
+  emitUninstallProgress(event.sender, 72, "Cleaning uninstall entry", "Windows Apps & Features");
   await removeUninstallRegistry();
 
   setPendingUninstallCleanup({
@@ -1003,10 +1019,10 @@ ipcMain.handle("uninstall:run", async (event, request) => {
   emitUninstallProgress(
     event.sender,
     100,
-    "卸载准备完成",
+    "Uninstall is ready",
     request?.deleteUserData === true
-      ? "点击完成后会在后台继续删除安装目录和 .novayxk 数据。"
-      : "点击完成后会在后台继续删除安装目录，.novayxk 数据会保留。",
+      ? "After you click Finish, the install directory and .novayxk data will continue to be removed in the background."
+      : "After you click Finish, the install directory will continue to be removed in the background and .novayxk data will be kept.",
   );
 
   return {
@@ -1044,7 +1060,7 @@ function resolveRequestedCommandScope(command, requestedScope) {
 
 function resolveCommandCwd(commandScope) {
   if (commandScope === "system") return getSystemCommandCwd();
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   return activeProjectRoot;
 }
 
@@ -1056,8 +1072,8 @@ function getSystemCommandCwd() {
 
 function startTerminalTask(command, options = {}) {
   const normalized = String(command ?? "").trim();
-  if (!normalized) throw new Error("命令为空。");
-  if (normalized.length > MAX_FULL_COMMAND_LENGTH) throw new Error(`命令过长，请控制在 ${MAX_FULL_COMMAND_LENGTH} 字符内。`);
+  if (!normalized) throw new Error("The command is empty.");
+  if (normalized.length > MAX_FULL_COMMAND_LENGTH) throw new Error(`The command is too long. Keep it within ${MAX_FULL_COMMAND_LENGTH} characters.`);
   const commandScope = options.commandScope === "system" ? "system" : "project";
   const cwd = options.cwd || resolveCommandCwd(commandScope);
 
@@ -1179,7 +1195,7 @@ function runCommandAsTerminalTask(command, options = {}) {
     const serializedTask = serializeTerminalTask(finishedTask);
     const stillRunning = serializedTask.status === "running";
     const output = stillRunning
-      ? `${serializedTask.output.slice(-18000)}\n\n命令仍在终端任务中运行，尚未执行完成；后续输出会继续显示在底部“终端任务”面板。`.trim()
+      ? `${serializedTask.output.slice(-18000)}\n\nThe command is still running as a terminal task and has not finished yet. Future output will continue to appear in the bottom Terminal Tasks panel.`.trim()
       : serializedTask.output.slice(-20000);
     return {
       code: stillRunning ? null : serializedTask.code ?? 1,
@@ -1233,7 +1249,7 @@ function notifyTerminalTaskDone(task) {
 
 function stopTerminalTask(taskId) {
   const task = terminalTasks.get(String(taskId ?? ""));
-  if (!task) throw new Error("终端任务不存在。");
+  if (!task) throw new Error("The terminal task does not exist.");
   if (!task.child || task.status !== "running") return serializeTerminalTask(task);
   task.status = "stopped";
   task.endedAt = new Date().toISOString();
@@ -1259,21 +1275,21 @@ function stopTerminalTask(taskId) {
 
 function writeTerminalTaskInput(taskId, input) {
   const task = terminalTasks.get(String(taskId ?? ""));
-  if (!task) throw new Error("终端任务不存在。");
-  if (!task.child || task.status !== "running") throw new Error("终端任务没有在运行，不能发送输入。");
+  if (!task) throw new Error("The terminal task does not exist.");
+  if (!task.child || task.status !== "running") throw new Error("The terminal task is not running, so input cannot be sent.");
   if (!task.child.stdin || task.child.stdin.destroyed || !task.child.stdin.writable) {
-    throw new Error("当前终端任务不接受输入。");
+    throw new Error("The current terminal task is not accepting input.");
   }
   const rawInput = String(input ?? "");
-  if (!rawInput.trim()) throw new Error("请输入要发送到终端任务的内容。");
-  if (rawInput.length > 2000) throw new Error("单次终端输入不能超过 2000 个字符。");
+  if (!rawInput.trim()) throw new Error("Please enter the content to send to the terminal task.");
+  if (rawInput.length > 2000) throw new Error("A single terminal input cannot exceed 2000 characters.");
   const line = rawInput.endsWith("\n") || rawInput.endsWith("\r") ? rawInput : `${rawInput}${os.EOL}`;
   task.child.stdin.write(line, "utf8");
   task.needsInput = false;
   task.userIntervened = true;
   task.inputCount = (task.inputCount ?? 0) + 1;
   task.lastInputAt = new Date().toISOString();
-  task.output = trimTerminalOutput(`${task.output}\n[Novayxk 记录：用户已插手，并向当前终端任务发送了一行输入]\n`);
+  task.output = trimTerminalOutput(`${task.output}\n[Novayxk note: the user intervened and sent one line of input to the current terminal task]\n`);
   logBehavior("terminal:userInput", {
     taskId: task.id,
     title: task.title,
@@ -1287,7 +1303,7 @@ function writeTerminalTaskInput(taskId, input) {
 
 function restartTerminalTask(taskId) {
   const task = terminalTasks.get(String(taskId ?? ""));
-  if (!task) throw new Error("终端任务不存在。");
+  if (!task) throw new Error("The terminal task does not exist.");
   const command = task.command;
   const title = task.title;
   if (task.status === "running") stopTerminalTask(task.id);
@@ -1355,7 +1371,7 @@ function trimTerminalTasks() {
 }
 
 function titleFromCommand(command) {
-  return String(command ?? "").replace(/\s+/g, " ").trim().slice(0, 48) || "PowerShell 任务";
+  return String(command ?? "").replace(/\s+/g, " ").trim().slice(0, 48) || "PowerShell task";
 }
 
 function isLikelyLongRunningCommand(command) {
@@ -1372,10 +1388,10 @@ function isLikelyLongRunningCommand(command) {
 
 function formatStartedTerminalTaskOutput(task) {
   return [
-    `命令已作为终端任务启动：${task.title}`,
-    `任务 ID：${task.id}`,
-    `工作目录：${task.cwd}`,
-    "输出会在底部“终端任务”面板实时显示。",
+    `The command has started as a terminal task: ${task.title}`,
+    `Task ID: ${task.id}`,
+    `Working directory: ${task.cwd}`,
+    'Output will appear live in the bottom "Terminal Tasks" panel.',
   ].join("\n");
 }
 
@@ -1404,7 +1420,7 @@ function normalizePowerShellExitCode(code, output) {
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ["openDirectory"],
-    title: "选择一个代码项目",
+    title: "Choose a code project",
   });
 
   if (result.canceled || !result.filePaths[0]) return null;
@@ -1416,7 +1432,7 @@ ipcMain.handle("project:openPath", async (_event, projectRoot) => {
 });
 
 ipcMain.handle("project:refresh", async () => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   return {
     root: activeProjectRoot,
     tree: await buildTree(activeProjectRoot, 0, { maxDepth: TREE_INITIAL_DEPTH }),
@@ -1438,7 +1454,7 @@ ipcMain.handle("project:context", async (_event, request) => {
 ipcMain.handle("project:readFile", async (_event, relativePath) => {
   const fullPath = assertProjectFile(relativePath);
   const stat = await fs.stat(fullPath);
-  if (stat.size > 160_000) throw new Error("文件太大，请选择更小的文件。");
+  if (stat.size > 160_000) throw new Error("The file is too large. Please choose a smaller file.");
   return {
     path: relativePath,
     content: await fs.readFile(fullPath, "utf8"),
@@ -1448,7 +1464,7 @@ ipcMain.handle("project:readFile", async (_event, relativePath) => {
 ipcMain.handle("project:getFileAsset", async (_event, relativePath) => {
   const fullPath = assertProjectFile(relativePath);
   const stat = await fs.stat(fullPath);
-  if (!stat.isFile()) throw new Error("当前选择的不是文件。");
+  if (!stat.isFile()) throw new Error("The current selection is not a file.");
   return {
     kind: "image",
     path: relativePath,
@@ -1461,8 +1477,8 @@ ipcMain.handle("project:getFileAsset", async (_event, relativePath) => {
 ipcMain.handle("project:saveFile", async (_event, request) => {
   const relativePath = request?.relativePath;
   const content = request?.content;
-  if (typeof content !== "string") throw new Error("文件内容无效。");
-  if (content.length > 400_000) throw new Error("文件内容太长，请拆成更小的文件。");
+  if (typeof content !== "string") throw new Error("Invalid file content.");
+  if (content.length > 400_000) throw new Error("The file content is too long. Please split it into a smaller file.");
   const fullPath = assertProjectFile(relativePath);
   await fs.writeFile(fullPath, content, "utf8");
   logApp("project:fileSaved", {
@@ -1474,19 +1490,19 @@ ipcMain.handle("project:saveFile", async (_event, request) => {
 });
 
 ipcMain.handle("project:applyPatch", async (_event, patchText) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
-  if (!patchText || patchText.length > 400_000) throw new Error("补丁为空或过长。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
+  if (!patchText || patchText.length > 400_000) throw new Error("The patch is empty or too large.");
 
   const files = parseUnifiedPatch(patchText);
-  if (!files.length) throw new Error("没有识别到可应用的 unified diff。");
+  if (!files.length) throw new Error("No applicable unified diff was recognized.");
 
   const backups = [];
   for (const file of files) {
     const fullPath = assertProjectFile(file.path);
     const existingStat = await statIfExists(fullPath);
-    if (file.isCreate && existingStat) throw new Error(`补丁要新增的文件已存在：${file.path}`);
-    if (!file.isCreate && !existingStat) throw new Error(`补丁目标文件不存在：${file.path}`);
-    if (file.isDelete && existingStat?.isDirectory()) throw new Error(`补丁不能删除目录：${file.path}`);
+    if (file.isCreate && existingStat) throw new Error(`The file to be created by the patch already exists: ${file.path}`);
+    if (!file.isCreate && !existingStat) throw new Error(`The patch target file does not exist: ${file.path}`);
+    if (file.isDelete && existingStat?.isDirectory()) throw new Error(`The patch cannot delete a directory: ${file.path}`);
 
     const original = existingStat ? await fs.readFile(fullPath, "utf8") : "";
     const nextContent = applyHunks(original, file.hunks);
@@ -1530,17 +1546,17 @@ ipcMain.handle("project:applyPatch", async (_event, patchText) => {
 });
 
 ipcMain.handle("project:applyFileOps", async (_event, operations) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
-  if (!Array.isArray(operations) || operations.length === 0) throw new Error("没有可执行的文件操作。");
-  if (operations.length > 30) throw new Error("文件操作过多，请拆成更小的步骤。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
+  if (!Array.isArray(operations) || operations.length === 0) throw new Error("There are no file operations to execute.");
+  if (operations.length > 30) throw new Error("There are too many file operations. Please split them into smaller steps.");
 
   const changedFiles = [];
   for (const operation of operations) {
-    if (!operation || typeof operation !== "object") throw new Error("文件操作格式无效。");
+    if (!operation || typeof operation !== "object") throw new Error("Invalid file operation format.");
     if (operation.type !== "mkdir" && operation.type !== "write" && operation.type !== "replace" && operation.type !== "delete") {
-      throw new Error(`不支持的文件操作：${operation.type}`);
+      throw new Error(`Unsupported file operation: ${operation.type}`);
     }
-    if (!operation.path || typeof operation.path !== "string") throw new Error("文件操作缺少 path。");
+    if (!operation.path || typeof operation.path !== "string") throw new Error("The file operation is missing a path.");
 
     const targetPath = assertProjectFile(operation.path);
     if (operation.type === "mkdir") {
@@ -1554,7 +1570,7 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
         await fs.rm(targetPath, { recursive: true, force: false });
       } catch (error) {
         if (error.code === "ENOENT") {
-          throw new Error(`要删除的路径不存在：${operation.path}`);
+          throw new Error(`The path to delete does not exist: ${operation.path}`);
         }
         throw error;
       }
@@ -1563,17 +1579,17 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
     }
 
     if (operation.type === "replace") {
-      if (typeof operation.search !== "string" || !operation.search) throw new Error(`替换操作缺少 search：${operation.path}`);
-      if (typeof operation.replace !== "string") throw new Error(`替换操作缺少 replace：${operation.path}`);
+      if (typeof operation.search !== "string" || !operation.search) throw new Error(`The replace operation is missing search: ${operation.path}`);
+      if (typeof operation.replace !== "string") throw new Error(`The replace operation is missing replace: ${operation.path}`);
       if (operation.search.length > 50_000 || operation.replace.length > 50_000) {
-        throw new Error(`替换内容过长：${operation.path}`);
+        throw new Error(`The replace content is too long: ${operation.path}`);
       }
       const original = await fs.readFile(targetPath, "utf8").catch((error) => {
-        if (error.code === "ENOENT") throw new Error(`要替换的文件不存在：${operation.path}`);
+        if (error.code === "ENOENT") throw new Error(`The file to replace does not exist: ${operation.path}`);
         throw error;
       });
       if (!original.includes(operation.search)) {
-        throw new Error(`未在文件中找到要替换的原文：${operation.path}`);
+        throw new Error(`The original text to replace was not found in the file: ${operation.path}`);
       }
       const nextContent =
         operation.occurrence === "all"
@@ -1584,8 +1600,8 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
       continue;
     }
 
-    if (typeof operation.content !== "string") throw new Error(`写入文件缺少 content：${operation.path}`);
-    if (operation.content.length > 400_000) throw new Error(`文件内容过长：${operation.path}`);
+    if (typeof operation.content !== "string") throw new Error(`The write operation is missing content: ${operation.path}`);
+    if (operation.content.length > 400_000) throw new Error(`The file content is too long: ${operation.path}`);
 
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
     try {
@@ -1595,7 +1611,7 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
       });
     } catch (error) {
       if (error.code === "EEXIST") {
-        throw new Error(`文件已存在，若要覆盖请在 fileops 中设置 overwrite: true：${operation.path}`);
+        throw new Error(`The file already exists. To overwrite it, set overwrite: true in fileops: ${operation.path}`);
       }
       throw error;
     }
@@ -1618,9 +1634,9 @@ ipcMain.handle("project:applyFileOps", async (_event, operations) => {
 });
 
 ipcMain.handle("project:undoLastPatch", async () => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   const transaction = patchTransactions.pop();
-  if (!transaction) throw new Error("没有可撤销的补丁。");
+  if (!transaction) throw new Error("There is no patch available to undo.");
 
   const restored = [];
   for (const file of transaction.files) {
@@ -1650,7 +1666,7 @@ ipcMain.handle("project:inspectCommand", async (_event, command) => ({
 }));
 
 ipcMain.handle("project:runCommand", async (_event, command) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   const inspection = inspectCommand(command);
   if (!inspection.allowed) {
     logApp("command:blocked", {
@@ -1659,7 +1675,7 @@ ipcMain.handle("project:runCommand", async (_event, command) => {
       commandPreview: String(command).slice(0, 500),
       controlMode: "safe",
     }, "warn");
-    throw new Error(`命令已被拦截：${inspection.reason}`);
+    throw new Error(`The command was blocked: ${inspection.reason}`);
   }
   if (isLikelyLongRunningCommand(command)) {
     const task = startTerminalTask(command);
@@ -1687,7 +1703,7 @@ ipcMain.handle("project:runCommandWithMode", async (_event, request) => {
   const inspection = request?.confirmedSystemAction === true
     ? {
         allowed: true,
-        reason: "特殊系统动作已由用户确认。",
+        reason: "The special system action was confirmed by the user.",
       }
     : inspectCommandForMode(command, controlMode);
   if (!inspection.allowed) {
@@ -1701,7 +1717,7 @@ ipcMain.handle("project:runCommandWithMode", async (_event, request) => {
       requiresConfirmation: inspection.requiresConfirmation === true,
       systemAction: inspection.systemAction || null,
     }, "warn");
-    const error = new Error(`命令已被拦截：${inspection.reason}`);
+    const error = new Error(`The command was blocked: ${inspection.reason}`);
     if (inspection.requiresConfirmation) {
       error.code = "SYSTEM_ACTION_CONFIRMATION_REQUIRED";
       error.systemAction = inspection.systemAction;
@@ -1740,10 +1756,10 @@ ipcMain.handle("terminal:start", async (_event, request) => {
   const commandScope = resolveRequestedCommandScope(command, request?.commandScope);
   const cwd = resolveCommandCwd(commandScope);
   const inspection = request?.confirmedSystemAction === true
-    ? { allowed: true, reason: "特殊系统动作已由用户确认。" }
+    ? { allowed: true, reason: "The special system action was confirmed by the user." }
     : inspectCommandForMode(command, mode);
   if (!inspection.allowed) {
-    const error = new Error(`命令已被拦截：${inspection.reason}`);
+    const error = new Error(`The command was blocked: ${inspection.reason}`);
     if (inspection.requiresConfirmation) {
       error.code = "SYSTEM_ACTION_CONFIRMATION_REQUIRED";
       error.systemAction = inspection.systemAction;
@@ -1762,22 +1778,22 @@ ipcMain.handle("terminal:restart", async (_event, taskId) => restartTerminalTask
 ipcMain.handle("terminal:list", async () => listTerminalTasks());
 
 ipcMain.handle("memory:getProjectState", async () => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   return readProjectMemoryState();
 });
 
 ipcMain.handle("memory:saveProjectMemory", async (_event, memory) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   return writeProjectMemory(memory);
 });
 
 ipcMain.handle("memory:saveTask", async (_event, taskInput) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   return saveTaskHistory(taskInput);
 });
 
 ipcMain.handle("memory:loadTask", async (_event, taskId) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   return loadTaskHistory(taskId);
 });
 
@@ -1813,11 +1829,11 @@ ipcMain.handle("ai:testProvider", async (_event, provider) => {
     const models = await listProviderModels(provider);
     const selectedModel = String(provider?.model || "").trim();
     const modelNote = selectedModel && !models.includes(selectedModel)
-      ? `，但当前模型 ${selectedModel} 未出现在模型列表里`
+      ? `, but the current model ${selectedModel} does not appear in the model list`
       : "";
     return {
       ok: true,
-      message: `图片接口连接成功：已读取 ${models.length} 个模型${modelNote}。`,
+      message: `Image endpoint connected successfully: loaded ${models.length} model(s)${modelNote}.`,
     };
   }
 
@@ -1833,7 +1849,7 @@ ipcMain.handle("ai:testProvider", async (_event, provider) => {
   const content = extractModelText(data, provider.apiMode ?? "chatCompletions").trim();
   return {
     ok: true,
-    message: content ? `连接成功：${content}` : "连接成功。",
+    message: content ? `Connection successful: ${content}` : "Connection successful.",
   };
 });
 
@@ -1872,7 +1888,7 @@ ipcMain.handle("ai:generateImage", async (_event, request) => {
     return {
       ok: true,
       images,
-      message: `图片生成完成：${images.length} 张`,
+      message: `Image generation complete: ${images.length} image(s)`,
     };
   } finally {
     if (activeImageGenerationController === controller) {
@@ -1901,7 +1917,7 @@ ipcMain.handle("ai:copyGeneratedImage", async (_event, imagePath) => {
     image = nativeImage.createFromBuffer(await fs.readFile(targetPath));
   }
   if (image.isEmpty()) {
-    throw new Error("无法复制这张图片。");
+    throw new Error("This image could not be copied.");
   }
   clipboard.clear();
   clipboard.write({
@@ -1913,7 +1929,7 @@ ipcMain.handle("ai:copyGeneratedImage", async (_event, imagePath) => {
 });
 
 ipcMain.handle("ai:saveGeneratedImageToProject", async (_event, request) => {
-  if (!activeProjectRoot) throw new Error("请先打开一个项目。");
+  if (!activeProjectRoot) throw new Error("Please open a project first.");
   const sourcePath = assertGeneratedImageFile(request?.imagePath);
   const requestedPath = sanitizeGeneratedImageFileName(request?.targetPath || "");
   const relativePath = requestedPath
@@ -1923,9 +1939,9 @@ ipcMain.handle("ai:saveGeneratedImageToProject", async (_event, request) => {
     const explicitTarget = assertProjectFile(relativePath);
     try {
       await fs.access(explicitTarget);
-      throw new Error(`目标文件已存在：${relativePath}`);
+      throw new Error(`The target file already exists: ${relativePath}`);
     } catch (error) {
-      if (error?.message?.startsWith("目标文件已存在")) throw error;
+      if (error?.message?.startsWith("The target file already exists")) throw error;
       if (error?.code !== "ENOENT") throw error;
     }
   }
@@ -1950,7 +1966,7 @@ ipcMain.handle("ai:listProviderModels", async (_event, provider) => {
   return {
     ok: true,
     models,
-    message: `已读取 ${models.length} 个模型`,
+    message: `Loaded ${models.length} model(s)`,
   };
 });
 
@@ -1983,12 +1999,12 @@ ipcMain.on("ai:chatStream", async (event, requestId, request) => {
       },
       {
         controller,
-        abortMessage: "用户已停止本次生成。",
+        abortMessage: "The current generation was stopped by the user.",
       },
     );
     event.sender.send("ai:chatStream:done", requestId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "模型请求失败";
+    const message = error instanceof Error ? error.message : "Model request failed.";
     logError("ai:chatStream:ipcError", error, { requestId });
     event.sender.send("ai:chatStream:error", requestId, message);
   } finally {
@@ -2075,14 +2091,14 @@ ipcMain.on("browser:workspaceCommand", async (event, requestId, request) => {
         .catch((error) => {
           replyToSender({
             ok: false,
-            error: error instanceof Error ? error.message : "读取浏览器轨迹失败",
+            error: error instanceof Error ? error.message : "Failed to read the browser trace.",
           });
         });
       return;
     }
     replyToSender({
       ok: false,
-      error: "浏览器工作区窗口不可用",
+      error: "The browser workspace window is unavailable.",
     });
     return;
   }
@@ -2103,21 +2119,21 @@ ipcMain.on("browser:workspaceCommand", async (event, requestId, request) => {
     cleanup();
     replyToSender({
       ok: false,
-      error: "浏览器工作区命令执行超时",
+      error: "The browser workspace command timed out.",
     });
   }, BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS);
 
   try {
     await waitForBrowserWorkspaceReady(targetWindow);
     if (targetWindow.isDestroyed()) {
-      throw new Error("浏览器工作区窗口已关闭");
+      throw new Error("The browser workspace window was closed.");
     }
     targetWindow.webContents.send("browser:workspaceCommand:execute", requestId, request);
   } catch (error) {
     cleanup();
     replyToSender({
       ok: false,
-      error: error instanceof Error ? error.message : "浏览器工作区命令执行失败",
+      error: error instanceof Error ? error.message : "Browser workspace command failed.",
     });
   }
 });

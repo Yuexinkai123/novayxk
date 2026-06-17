@@ -9,6 +9,7 @@ import {
   StepForward,
 } from "lucide-react";
 import type {
+  AppLanguage,
   BrowserAutomationResult,
   BrowserActionRecord,
   BrowserNetworkRecord,
@@ -22,8 +23,10 @@ import {
   formatBrowserNetworkSummary,
 } from "../../browser/workspace";
 import type { BrowserRuntimeView } from "../../browser/runtime";
+import { getLocaleStrings } from "../../app/i18n";
 
 type BrowserWorkspaceProps = {
+  language: AppLanguage;
   webviewRef: React.MutableRefObject<BrowserRuntimeView | null>;
   browserUrlInput: string;
   browserSnapshot: BrowserSnapshot;
@@ -54,9 +57,6 @@ type BrowserWorkspaceProps = {
   isActive: boolean;
 };
 
-const BROWSER_PREVIEW_UNSUPPORTED_MESSAGE =
-  "当前是浏览器预览环境，内嵌浏览器只在 Electron 桌面窗口里可用。";
-
 function formatTimeLabel(value: string) {
   try {
     return new Date(value).toLocaleTimeString();
@@ -66,6 +66,7 @@ function formatTimeLabel(value: string) {
 }
 
 export function BrowserWorkspace({
+  language,
   webviewRef,
   browserUrlInput,
   browserSnapshot,
@@ -98,12 +99,13 @@ export function BrowserWorkspace({
   const [browserLoadError, setBrowserLoadError] = React.useState("");
   const [isNativeWebviewSupported, setIsNativeWebviewSupported] = React.useState(() => Boolean(window.novayxk));
   const [isBrowserViewReady, setIsBrowserViewReady] = React.useState(false);
+  const strings = getLocaleStrings(language).browser;
 
   React.useEffect(() => {
     if (!window.novayxk) {
       setIsNativeWebviewSupported(false);
       setIsBrowserViewReady(false);
-      setBrowserLoadError(BROWSER_PREVIEW_UNSUPPORTED_MESSAGE);
+      setBrowserLoadError(strings.previewUnsupported);
       return;
     }
 
@@ -143,7 +145,7 @@ export function BrowserWorkspace({
     const onDidFailLoad = (event: Event) => {
       const detail = (event as CustomEvent).detail as { errorDescription?: string; validatedURL?: string } | undefined;
       const failedUrl = detail?.validatedURL || view.getURL() || browserTargetUrl;
-      const reason = detail?.errorDescription || "页面加载失败";
+      const reason = detail?.errorDescription || strings.pageFailedToLoad;
       setBrowserLoadError(`${reason} (${failedUrl})`);
       window.novayxk?.emitBrowserActionObserved({
         id: `browser-action-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -222,7 +224,7 @@ export function BrowserWorkspace({
       view.removeEventListener("page-title-updated", onPageTitleUpdated as EventListener);
       view.removeEventListener("ipc-message", onIpcMessage as EventListener);
     };
-  }, [browserSnapshot.currentUrl, browserSnapshot.startedAt, browserSnapshot.title, browserTargetUrl]);
+  }, [browserSnapshot.currentUrl, browserSnapshot.startedAt, browserSnapshot.title, browserTargetUrl, strings]);
 
   React.useEffect(() => {
     const view = webviewRef.current;
@@ -264,7 +266,7 @@ export function BrowserWorkspace({
         preview: String(result ?? "undefined").slice(0, 160),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 160) : "脚本执行失败";
+      const message = error instanceof Error ? error.message.slice(0, 160) : strings.scriptExecutionFailed;
       window.novayxk?.emitBrowserActionObserved({
         id: `browser-action-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
         source: "system",
@@ -279,7 +281,7 @@ export function BrowserWorkspace({
         preview: message,
       });
     }
-  }, [browserScriptInput, browserSnapshot.currentUrl, onBrowserScriptExecuted]);
+  }, [browserScriptInput, browserSnapshot.currentUrl, onBrowserScriptExecuted, strings.scriptExecutionFailed]);
 
   return (
     <div className={`browser-workspace ${isActive ? "is-active" : "is-hidden"}`}>
@@ -289,7 +291,7 @@ export function BrowserWorkspace({
             className="browser-nav-button"
             onClick={() => onRunBrowserCommand("back")}
             disabled={!browserSnapshot.canGoBack}
-            title="后退"
+            title={strings.back}
           >
             <StepBack size={15} />
           </button>
@@ -297,11 +299,11 @@ export function BrowserWorkspace({
             className="browser-nav-button"
             onClick={() => onRunBrowserCommand("forward")}
             disabled={!browserSnapshot.canGoForward}
-            title="前进"
+            title={strings.forward}
           >
             <StepForward size={15} />
           </button>
-          <button className="browser-nav-button" onClick={() => onRunBrowserCommand("reload")} title="刷新">
+          <button className="browser-nav-button" onClick={() => onRunBrowserCommand("reload")} title={strings.refresh}>
             <RefreshCw size={15} />
           </button>
           <div className="browser-address-shell">
@@ -315,18 +317,18 @@ export function BrowserWorkspace({
                   onNavigateBrowser();
                 }
               }}
-              placeholder="输入网址，例如 www.baidu.com"
-              aria-label="浏览器地址栏"
+              placeholder={strings.addressPlaceholder}
+              aria-label={strings.addressLabel}
             />
           </div>
           <button className="primary-button browser-open-button" onClick={onNavigateBrowser}>
             <ExternalLink size={15} />
-            打开
+            {strings.open}
           </button>
         </div>
         <div className="browser-toolbar-meta">
-          <span>{browserSnapshot.title || "Browser Workspace"}</span>
-          <span>{browserSnapshot.isLoading ? "加载中" : "空闲"}</span>
+          <span>{browserSnapshot.title || strings.browserWorkspace}</span>
+          <span>{browserSnapshot.isLoading ? strings.loading : strings.idle}</span>
         </div>
         {showAdvancedControls ? (
           <>
@@ -334,31 +336,31 @@ export function BrowserWorkspace({
               <textarea
                 value={browserScriptInput}
                 onChange={(event) => onBrowserScriptInputChange(event.target.value)}
-                placeholder="在当前页面执行一段前端脚本，例如 document.title"
-                aria-label="浏览器脚本输入框"
+                placeholder={strings.scriptPlaceholder}
+                aria-label={strings.scriptLabel}
               />
               <button className="primary-button browser-script-button" onClick={() => void handleRunScript()}>
-                执行脚本
+                {strings.runScript}
               </button>
             </div>
             <div className="browser-automation-row">
               <input
                 value={browserActionSelector}
                 onChange={(event) => onBrowserActionSelectorChange(event.target.value)}
-                placeholder="CSS 选择器，例如 button[type=submit]"
-                aria-label="浏览器动作选择器"
+                placeholder={strings.selectorPlaceholder}
+                aria-label={strings.selectorLabel}
               />
               <input
                 value={browserActionText}
                 onChange={(event) => onBrowserActionTextChange(event.target.value)}
-                placeholder="输入文本，可用于 type 动作"
-                aria-label="浏览器动作文本"
+                placeholder={strings.textPlaceholder}
+                aria-label={strings.textLabel}
               />
               <input
                 value={browserActionTimeoutMs}
                 onChange={(event) => onBrowserActionTimeoutChange(event.target.value)}
-                placeholder="等待超时毫秒"
-                aria-label="浏览器动作超时"
+                placeholder={strings.timeoutPlaceholder}
+                aria-label={strings.timeoutLabel}
               />
               <button
                 className="ghost-button browser-automation-button"
@@ -372,7 +374,7 @@ export function BrowserWorkspace({
                 }
                 disabled={!browserActionSelector.trim()}
               >
-                点击
+                {strings.click}
               </button>
               <button
                 className="ghost-button browser-automation-button"
@@ -386,7 +388,7 @@ export function BrowserWorkspace({
                 }
                 disabled={!browserActionSelector.trim()}
               >
-                输入
+                {strings.type}
               </button>
               <button
                 className="ghost-button browser-automation-button"
@@ -404,17 +406,17 @@ export function BrowserWorkspace({
                 }
                 disabled={!browserActionSelector.trim()}
               >
-                等待
+                {strings.wait}
               </button>
             </div>
             {lastBrowserAutomationResult ? (
               <div className={`browser-automation-result ${lastBrowserAutomationResult.ok ? "ok" : "error"}`}>
-                最近动作：{lastBrowserAutomationResult.action} · {lastBrowserAutomationResult.preview}
+                {strings.latestAction}: {lastBrowserAutomationResult.action} · {lastBrowserAutomationResult.preview}
               </div>
             ) : null}
             {browserPromptSnapshot ? (
               <div className="browser-context-preview">
-                页面摘要：{(browserPromptSnapshot.headings[0] || browserPromptSnapshot.title || browserPromptSnapshot.url).slice(0, 140)}
+                {strings.pageSummary}: {(browserPromptSnapshot.headings[0] || browserPromptSnapshot.title || browserPromptSnapshot.url).slice(0, 140)}
               </div>
             ) : null}
           </>
@@ -424,7 +426,7 @@ export function BrowserWorkspace({
       <div className="browser-layout">
         <div className="browser-surface">
           <div className="browser-surface-header">
-            <span>内嵌浏览器</span>
+            <span>{strings.embeddedBrowser}</span>
             {browserSnapshot.isLoading ? <LoaderCircle size={14} className="spin" /> : null}
           </div>
           <div className={`browser-webview-shell ${browserLoadError ? "has-error" : ""}`}>
@@ -439,7 +441,7 @@ export function BrowserWorkspace({
                   );
                   setIsNativeWebviewSupported(supportsNativeApi);
                   if (!supportsNativeApi) {
-                    setBrowserLoadError(BROWSER_PREVIEW_UNSUPPORTED_MESSAGE);
+                    setBrowserLoadError(strings.previewUnsupported);
                   }
                 }}
                 className="browser-webview"
@@ -451,18 +453,18 @@ export function BrowserWorkspace({
             ) : null}
             {!browserLoadError && !isBrowserViewReady ? (
               <div className="browser-empty-state">
-                <strong>浏览器内容区正在初始化</strong>
-                <p>如果这里长时间没有页面内容，说明内嵌 webview 还没有真正挂载成功。</p>
+                <strong>{strings.initializingTitle}</strong>
+                <p>{strings.initializingBody}</p>
               </div>
             ) : null}
             {browserLoadError ? (
               <div className="browser-empty-state browser-empty-state-error">
-                <strong>这个页面没有正常显示</strong>
+                <strong>{strings.renderErrorTitle}</strong>
                 <p>{browserLoadError}</p>
                 <p>
                   {isNativeWebviewSupported
-                    ? "不少网站会拒绝被内嵌显示，常见原因是 X-Frame-Options、CSP 或站点自身策略。"
-                    : "如果你现在打开的是 http://127.0.0.1:5173/ 这种浏览器预览页，这块不会像桌面版那样工作。"}
+                    ? strings.embeddedPolicyHelp
+                    : strings.previewModeHelp}
                 </p>
               </div>
             ) : null}
@@ -472,14 +474,14 @@ export function BrowserWorkspace({
         <aside className="browser-inspector">
           <div className="browser-log-panel">
             <div className="browser-log-header">
-              <strong>操作记录</strong>
-              <button className="browser-clear-button" onClick={onClearBrowserLogs} title="清空日志">
+              <strong>{strings.actionLog}</strong>
+              <button className="browser-clear-button" onClick={onClearBrowserLogs} title={strings.clearLogs}>
                 <Eraser size={14} />
               </button>
             </div>
             {browserTraceSnapshot?.path ? (
               <div className="browser-trace-file" title={browserTraceSnapshot.path}>
-                临时轨迹：{browserTraceSnapshot.path}
+                {strings.tempTrace}: {browserTraceSnapshot.path}
               </div>
             ) : null}
             <div className="browser-log-list">
@@ -490,26 +492,26 @@ export function BrowserWorkspace({
                   <small>{formatTimeLabel(record.createdAt)}</small>
                 </div>
               )) : (
-                <div className="browser-log-empty">还没有记录到浏览器操作。</div>
+                <div className="browser-log-empty">{strings.noActions}</div>
               )}
             </div>
           </div>
 
           <div className="browser-log-panel">
             <div className="browser-log-header">
-              <strong>网络请求</strong>
+              <strong>{strings.networkRequests}</strong>
             </div>
             <div className="browser-log-list">
               {browserNetworkLog.length ? browserNetworkLog.map((record) => (
                 <div key={`${record.id}-${record.stage}`} className="browser-log-item">
                   <strong>{formatBrowserNetworkSummary(record)}</strong>
                   <span>{record.url}</span>
-                  {record.requestBodyText ? <span>request: {record.requestBodyText.slice(0, 160)}</span> : null}
-                  {record.responseBodyText ? <span>response: {record.responseBodyText.slice(0, 160)}</span> : null}
+                  {record.requestBodyText ? <span>{strings.requestPrefix}: {record.requestBodyText.slice(0, 160)}</span> : null}
+                  {record.responseBodyText ? <span>{strings.responsePrefix}: {record.responseBodyText.slice(0, 160)}</span> : null}
                   <small>{formatTimeLabel(record.createdAt)}</small>
                 </div>
               )) : (
-                <div className="browser-log-empty">还没有记录到网络请求。</div>
+                <div className="browser-log-empty">{strings.noNetwork}</div>
               )}
             </div>
           </div>

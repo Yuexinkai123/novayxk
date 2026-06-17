@@ -1,5 +1,5 @@
 import React from "react";
-import type { AppConfig, AiControlMode, AssistantMode, PendingAdminResume, ProviderConfig, ThemeMode } from "../vite-env";
+import type { AppConfig, AiControlMode, AppLanguage, AssistantMode, LanguagePreferenceSource, PendingAdminResume, ProviderConfig, ThemeMode } from "../vite-env";
 import { defaultProvider, getProviderId, inferProviderApiMode, isAiControlMode, isAssistantMode, isThemeMode } from "../ai/providers";
 import type { PrivilegeState } from "../components/settings/SettingsModal";
 import { createDesktopBridgeUnavailableError, formatActionableError } from "../app/errors";
@@ -12,6 +12,8 @@ type UseProviderSettingsOptions = {
 export function useProviderSettings({ initialConfig, setStatus }: UseProviderSettingsOptions) {
   const initialProviders = initialConfig?.providers?.length ? initialConfig.providers : [defaultProvider];
   const initialActiveProviderId = getProviderId(initialProviders, initialConfig?.activeProviderId, initialProviders[0].id);
+  const initialLanguage: AppLanguage = initialConfig?.language === "zh-CN" ? "zh-CN" : "en";
+  const initialLanguagePreferenceSource: LanguagePreferenceSource = initialConfig?.languagePreferenceSource === "user" ? "user" : "system";
   const initialTheme = isThemeMode(initialConfig?.theme) ? initialConfig.theme : "dark";
   const initialAiControlMode = isAiControlMode(initialConfig?.aiControlMode) ? initialConfig.aiControlMode : "safe";
   const initialAssistantMode = isAssistantMode(initialConfig?.assistantMode) ? initialConfig.assistantMode : "standard";
@@ -21,6 +23,8 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
   const [activeProviderId, setActiveProviderId] = React.useState(initialActiveProviderId);
   const [editingProviderId, setEditingProviderId] = React.useState(initialActiveProviderId);
   const [lastProjectRoot, setLastProjectRoot] = React.useState<string | null>(initialConfig?.lastProjectRoot ?? null);
+  const [language, setLanguage] = React.useState<AppLanguage>(initialLanguage);
+  const [languagePreferenceSource, setLanguagePreferenceSource] = React.useState<LanguagePreferenceSource>(initialLanguagePreferenceSource);
   const [providerTestStatus, setProviderTestStatus] = React.useState("");
   const [isTestingProvider, setIsTestingProvider] = React.useState(false);
   const [providerModelOptions, setProviderModelOptions] = React.useState<Record<string, string[]>>({});
@@ -51,6 +55,12 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
       if (typeof patch.hasSeenWorkspaceGuide === "boolean") {
         setHasSeenWorkspaceGuide(patch.hasSeenWorkspaceGuide);
       }
+      if (patch.language === "en" || patch.language === "zh-CN") {
+        setLanguage(patch.language);
+      }
+      if (patch.languagePreferenceSource === "user" || patch.languagePreferenceSource === "system") {
+        setLanguagePreferenceSource(patch.languagePreferenceSource);
+      }
       if ("pendingAdminResume" in patch) {
         setPendingAdminResume(patch.pendingAdminResume ?? null);
       }
@@ -58,6 +68,8 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         providers,
         activeProviderId,
         lastProjectRoot,
+        language,
+        languagePreferenceSource,
         theme,
         aiControlMode,
         assistantMode,
@@ -68,7 +80,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         ...patch,
       });
     },
-    [activeProviderId, aiControlMode, assistantMode, browserShowAdvancedControls, hasSeenWelcome, hasSeenWorkspaceGuide, lastProjectRoot, pendingAdminResume, providers, theme],
+    [activeProviderId, aiControlMode, assistantMode, browserShowAdvancedControls, hasSeenWelcome, hasSeenWorkspaceGuide, language, languagePreferenceSource, lastProjectRoot, pendingAdminResume, providers, theme],
   );
 
   const savePendingAdminResume = React.useCallback(
@@ -91,7 +103,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         setEditingProviderId(resolvedActiveId);
       }
       await saveAppConfig({ providers: nextProviders, activeProviderId: resolvedActiveId });
-      setStatus("模型供应商配置已保存");
+      setStatus("Model provider settings saved");
     },
     [activeProviderId, editingProviderId, providers, saveAppConfig, setStatus],
   );
@@ -101,11 +113,11 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
       const nextActiveId = getProviderId(providers, providerId, activeProviderId);
       setActiveProviderId(nextActiveId);
       setEditingProviderId(nextActiveId);
-      setStatus("已切换模型供应商");
+      setStatus("Switched the model provider");
       try {
         await saveAppConfig({ activeProviderId: nextActiveId });
       } catch {
-        setStatus("模型已切换，但默认模型保存失败");
+        setStatus("The model provider was switched, but the default selection could not be saved");
       }
     },
     [activeProviderId, providers, saveAppConfig, setStatus],
@@ -117,7 +129,23 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
       try {
         await saveAppConfig({ theme: nextTheme });
       } catch {
-        setStatus("主题已切换，但偏好保存失败");
+        setStatus("Theme switched, but the preference could not be saved");
+      }
+    },
+    [saveAppConfig, setStatus],
+  );
+
+  const updateLanguage = React.useCallback(
+    async (nextLanguage: AppLanguage) => {
+      setLanguage(nextLanguage);
+      setLanguagePreferenceSource("user");
+      try {
+        await saveAppConfig({ language: nextLanguage, languagePreferenceSource: "user" });
+        setStatus(nextLanguage === "zh-CN" ? "语言已切换为简体中文" : "Language switched to English");
+        return true;
+      } catch {
+        setStatus(nextLanguage === "zh-CN" ? "语言已切换，但保存偏好失败" : "Language switched, but the preference could not be saved");
+        return false;
       }
     },
     [saveAppConfig, setStatus],
@@ -130,7 +158,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         await saveAppConfig({ aiControlMode: nextMode });
         return true;
       } catch {
-        setStatus("执行范围已切换，但保存偏好失败");
+        setStatus("Execution scope switched, but the preference could not be saved");
         return false;
       }
     },
@@ -144,7 +172,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         await saveAppConfig({ assistantMode: nextMode });
         return true;
       } catch {
-        setStatus("助手模式已切换，但保存偏好失败");
+        setStatus("Assistant mode switched, but the preference could not be saved");
         return false;
       }
     },
@@ -158,7 +186,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         await saveAppConfig({ browserShowAdvancedControls: nextValue });
         return true;
       } catch {
-        setStatus("浏览器高级操作区偏好已切换，但保存失败");
+        setStatus("The browser advanced controls preference was switched, but it could not be saved");
         return false;
       }
     },
@@ -178,13 +206,13 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
   const restartAsAdmin = React.useCallback(async () => {
     if (!window.novayxk || isRestartingAsAdmin) return false;
     setIsRestartingAsAdmin(true);
-    setStatus("正在切换到管理员模式...");
+    setStatus("Switching to Administrator Mode...");
     try {
       await window.novayxk.restartAsAdmin();
       return true;
     } catch (error) {
       setIsRestartingAsAdmin(false);
-      setStatus(formatActionableError(error, "切换管理员模式失败"));
+      setStatus(formatActionableError(error, "Failed to switch to Administrator Mode"));
       return false;
     }
   }, [isRestartingAsAdmin, setStatus]);
@@ -211,7 +239,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     const id = `provider-${Date.now()}`;
     const nextProvider: ProviderConfig = {
       id,
-      name: "新供应商",
+      name: "New provider",
       baseUrl: "https://api.example.com/v1",
       apiKey: "",
       model: "",
@@ -224,8 +252,8 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
 
   const removeActiveProvider = React.useCallback(async () => {
     if (providers.length <= 1) {
-      setProviderTestStatus("至少保留一个供应商配置。");
-      setStatus("至少保留一个供应商配置。");
+      setProviderTestStatus("Keep at least one provider configuration.");
+      setStatus("Keep at least one provider configuration.");
       return;
     }
 
@@ -237,28 +265,28 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     setProviders(nextProviders);
     setActiveProviderId(nextActiveId);
     setEditingProviderId(fallbackProvider.id);
-    setProviderTestStatus(`已移除供应商：${editingProvider.name}`);
-    setStatus(`已移除供应商：${editingProvider.name}`);
+    setProviderTestStatus(`Removed provider: ${editingProvider.name}`);
+    setStatus(`Removed provider: ${editingProvider.name}`);
     try {
       await saveAppConfig({ providers: nextProviders, activeProviderId: nextActiveId });
     } catch {
-      setStatus("供应商已移除，但保存配置失败");
+      setStatus("The provider was removed, but saving the configuration failed");
     }
   }, [activeProviderId, editingProvider.id, editingProvider.name, providers, saveAppConfig, setStatus]);
 
   const testActiveProvider = React.useCallback(async () => {
     setIsTestingProvider(true);
-    setProviderTestStatus("正在测试连接...");
+    setProviderTestStatus("Testing the connection...");
     try {
       if (!window.novayxk) {
-        throw createDesktopBridgeUnavailableError("连接测试");
+        throw createDesktopBridgeUnavailableError("Testing the connection");
       }
 
       const result = await window.novayxk.testProvider(editingProvider);
       setProviderTestStatus(result.message);
       setStatus(result.message);
     } catch (error) {
-      const message = formatActionableError(error, "连接测试失败");
+      const message = formatActionableError(error, "Connection test failed");
       setProviderTestStatus(message);
       setStatus(message);
     } finally {
@@ -285,11 +313,11 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
 
       setIsLoadingProviderModels(true);
       if (!options.silent) {
-        setProviderModelStatuses((current) => ({ ...current, [provider.id]: "正在读取模型列表..." }));
+        setProviderModelStatuses((current) => ({ ...current, [provider.id]: "Loading the model list..." }));
       }
       try {
         if (!window.novayxk) {
-          throw createDesktopBridgeUnavailableError("模型列表读取");
+          throw createDesktopBridgeUnavailableError("Loading the model list");
         }
 
         const result = await window.novayxk.listProviderModels(provider);
@@ -298,7 +326,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         lastModelLoadSignatureRef.current[provider.id] = signature;
         setProviderModelStatuses((current) => ({
           ...current,
-          [provider.id]: result.message || `已读取 ${models.length} 个模型`,
+          [provider.id]: result.message || `Loaded ${models.length} model(s)`,
         }));
 
         if (models.length && !provider.model.trim()) {
@@ -309,7 +337,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
         }
         return models;
       } catch (error) {
-        const message = formatActionableError(error, "读取模型列表失败");
+        const message = formatActionableError(error, "Failed to load the model list");
         setProviderModelStatuses((current) => ({ ...current, [provider.id]: message }));
         if (!options.silent) {
           setStatus(message);
@@ -361,6 +389,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     pendingAdminResume,
     privilege,
     isRestartingAsAdmin,
+    language,
     theme,
     browserShowAdvancedControls,
     activeProvider,
@@ -369,6 +398,7 @@ export function useProviderSettings({ initialConfig, setStatus }: UseProviderSet
     saveProviders,
     savePendingAdminResume,
     switchActiveProvider,
+    updateLanguage,
     updateTheme,
     updateAiControlMode,
     updateAssistantMode,

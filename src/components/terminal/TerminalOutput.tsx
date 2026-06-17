@@ -1,26 +1,31 @@
 import React from "react";
 import type { Terminal as XTermTerminal } from "@xterm/xterm";
 import type { FitAddon as XTermFitAddon } from "@xterm/addon-fit";
-import type { TerminalTask } from "../../vite-env";
+import type { AppLanguage, TerminalTask } from "../../vite-env";
+import { getLocaleStrings } from "../../app/i18n";
 
 type TerminalOutputProps = {
+  language: AppLanguage;
   activeTerminalTask: TerminalTask | null;
 };
 
-function getInitialTerminalText(task: TerminalTask | null) {
+type TerminalStrings = ReturnType<typeof getLocaleStrings>["terminal"];
+
+function getInitialTerminalText(task: TerminalTask | null, strings: TerminalStrings) {
   if (!task) {
     return "";
   }
-  return task.output || `${task.command}\r\n\r\n任务已启动，等待输出...`;
+  return task.output || `${task.command}\r\n\r\n${strings.taskStartedWaiting}`;
 }
 
-export function TerminalOutput({ activeTerminalTask }: TerminalOutputProps) {
+export function TerminalOutput({ language, activeTerminalTask }: TerminalOutputProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const terminalRef = React.useRef<XTermTerminal | null>(null);
   const fitAddonRef = React.useRef<XTermFitAddon | null>(null);
   const renderedTaskIdRef = React.useRef<string | null>(null);
   const renderedOutputRef = React.useRef("");
   const latestTaskRef = React.useRef<TerminalTask | null>(activeTerminalTask);
+  const strings = getLocaleStrings(language).terminal;
 
   latestTaskRef.current = activeTerminalTask;
 
@@ -61,7 +66,7 @@ export function TerminalOutput({ activeTerminalTask }: TerminalOutputProps) {
 
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
-      const initialText = getInitialTerminalText(latestTaskRef.current);
+      const initialText = getInitialTerminalText(latestTaskRef.current, strings);
       terminal.write(initialText);
       renderedTaskIdRef.current = latestTaskRef.current?.id ?? null;
       renderedOutputRef.current = initialText;
@@ -81,7 +86,7 @@ export function TerminalOutput({ activeTerminalTask }: TerminalOutputProps) {
       terminalRef.current = null;
       terminal?.dispose();
     };
-  }, []);
+  }, [strings]);
 
   React.useEffect(() => {
     const terminal = terminalRef.current;
@@ -89,7 +94,7 @@ export function TerminalOutput({ activeTerminalTask }: TerminalOutputProps) {
     if (!terminal || !fitAddon) return;
 
     const nextTaskId = activeTerminalTask?.id ?? null;
-    const nextOutput = getInitialTerminalText(activeTerminalTask);
+    const nextOutput = getInitialTerminalText(activeTerminalTask, strings);
     const renderedTaskId = renderedTaskIdRef.current;
     const renderedOutput = renderedOutputRef.current;
 
@@ -115,7 +120,7 @@ export function TerminalOutput({ activeTerminalTask }: TerminalOutputProps) {
 
     renderedOutputRef.current = nextOutput;
     fitAddon.fit();
-  }, [activeTerminalTask]);
+  }, [activeTerminalTask, strings]);
 
-  return <div ref={hostRef} className="terminal-output-shell" aria-label="终端输出" />;
+  return <div ref={hostRef} className="terminal-output-shell" aria-label={strings.outputLabel} />;
 }

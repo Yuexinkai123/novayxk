@@ -38,6 +38,21 @@ const isUninstallMode = cliArgs.includes("--uninstall") || isExecutableUninstall
 const uninstallTargetArg = getArgValue(cliArgs, "--target") || (isExecutableUninstaller ? launcherExecutableDir : "");
 const DEBUG_LOG_NAME = "novayxk-launch-debug.log";
 
+function normalizeSystemLanguage(value) {
+  return /^zh(?:[-_]|$)/i.test(String(value || "").trim()) ? "zh-CN" : "en";
+}
+
+function detectSystemLanguage() {
+  const preferredLanguages = typeof app.getPreferredSystemLanguages === "function"
+    ? app.getPreferredSystemLanguages()
+    : [];
+  const candidates = Array.isArray(preferredLanguages) ? preferredLanguages.filter(Boolean) : [];
+  if (typeof app.getLocale === "function") {
+    candidates.push(app.getLocale());
+  }
+  return normalizeSystemLanguage(candidates[0] || "en");
+}
+
 app.setName(isUninstallMode ? "Novayxk Uninstaller" : "Novayxk Installer");
 app.setAppUserModelId(isUninstallMode ? "com.novayxk.uninstaller" : "com.novayxk.installer");
 writeDebugLog("bootstrap", {
@@ -128,6 +143,7 @@ ipcMain.handle("installer:getDefaults", async () => {
   });
   return {
     mode: isUninstallMode ? "uninstall" : "install",
+    defaultLanguage: detectSystemLanguage(),
     version: app.getVersion(),
     defaultInstallDir,
     userDataDir: APP_USER_DATA_DIR,
@@ -136,9 +152,9 @@ ipcMain.handle("installer:getDefaults", async () => {
   };
 });
 
-ipcMain.handle("installer:chooseDirectory", async (_event, currentPath) => {
+ipcMain.handle("installer:chooseDirectory", async (_event, currentPath, language) => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "选择 Novayxk 安装位置",
+    title: language === "zh-CN" ? "选择 Novayxk 安装位置" : "Choose the Novayxk install location",
     defaultPath: currentPath || getDefaultInstallDir(),
     properties: ["openDirectory", "createDirectory"],
   });
@@ -177,7 +193,7 @@ ipcMain.handle("installer:install", async (event, options) => {
     source: "installer-main",
     installDir: options?.installDir || "",
   });
-  if (installInProgress) throw new Error("安装正在进行中。");
+  if (installInProgress) throw new Error("Installation is already in progress.");
   installInProgress = true;
 
   try {
@@ -187,52 +203,52 @@ ipcMain.handle("installer:install", async (event, options) => {
     const stagingDir = getStagingInstallDir(normalized.installDir);
 
     if (!(await pathExists(payloadDir))) {
-      throw new Error(`安装资源不存在：${payloadDir}`);
+      throw new Error(`Installation resources were not found: ${payloadDir}`);
     }
 
-    emitProgress(event, 2, "准备安装目录", normalized.installDir);
+    emitProgress(event, 2, "Preparing install directory", normalized.installDir);
     await assertInstallDirSafe(normalized.installDir);
     await removePath(stagingDir);
     await diskFs.mkdir(stagingDir, { recursive: true });
 
-    emitProgress(event, 7, "检查应用资源", "正在统计需要复制的文件");
+    emitProgress(event, 7, "Checking app resources", "Counting files to copy");
     const totalFiles = await countFiles(payloadDir);
 
-    emitProgress(event, 10, "复制 Novayxk", "正在写入主程序文件");
+    emitProgress(event, 10, "Copying Novayxk", "Writing main application files");
     let copiedFiles = 0;
     await copyDirectory(payloadDir, stagingDir, (filePath) => {
       copiedFiles += 1;
       const percent = 10 + Math.round((copiedFiles / Math.max(totalFiles, 1)) * 62);
-      emitProgress(event, Math.min(percent, 72), "复制 Novayxk", path.relative(payloadDir, filePath));
+      emitProgress(event, Math.min(percent, 72), "Copying Novayxk", path.relative(payloadDir, filePath));
     });
 
-    emitProgress(event, 73, "关闭旧版本进程", "正在释放可能被占用的程序文件");
+    emitProgress(event, 73, "Closing old version processes", "Releasing app files that may still be in use");
     await closeRunningAppProcesses();
 
-    emitProgress(event, 74, "切换安装目录", "正在替换旧版本文件");
+    emitProgress(event, 74, "Switching install directory", "Replacing files from the previous version");
     await replaceInstallDirectory(stagingDir, normalized.installDir);
 
-    emitProgress(event, 76, "写入卸载程序", "自定义卸载器默认保留 .novayxk 数据");
+    emitProgress(event, 76, "Writing uninstaller", "The custom uninstaller keeps .novayxk data by default");
     await prepareUninstaller(normalized.installDir, targetExe);
 
     if (normalized.createDesktopShortcut) {
-      emitProgress(event, 83, "创建桌面快捷方式", "Novayxk.lnk");
+      emitProgress(event, 83, "Creating desktop shortcut", "Novayxk.lnk");
       await createShortcut(getDesktopShortcutPath(), targetExe, normalized.installDir);
     } else {
       await removePath(getDesktopShortcutPath());
     }
 
     if (normalized.createStartMenuShortcut) {
-      emitProgress(event, 88, "创建开始菜单入口", "Novayxk.lnk");
+      emitProgress(event, 88, "Creating Start menu shortcut", "Novayxk.lnk");
       await createStartMenuShortcut(targetExe, normalized.installDir);
     } else {
       await removePath(getStartMenuShortcutPath());
     }
 
-    emitProgress(event, 94, "注册卸载入口", "Windows 应用和功能");
+    emitProgress(event, 94, "Registering uninstall entry", "Windows Apps & Features");
     await writeUninstallRegistry(normalized.installDir, targetExe, totalFiles);
 
-    emitProgress(event, 100, "安装完成", targetExe);
+    emitProgress(event, 100, "Installation complete", targetExe);
     return {
       ok: true,
       installDir: normalized.installDir,
@@ -252,7 +268,7 @@ ipcMain.handle("installer:uninstall", async (event, options) => {
     installDir: options?.installDir || "",
     deleteUserData: options?.deleteUserData === true,
   });
-  if (installInProgress) throw new Error("卸载正在进行中。");
+  if (installInProgress) throw new Error("Uninstall is already in progress.");
   installInProgress = true;
 
   try {
@@ -260,19 +276,19 @@ ipcMain.handle("installer:uninstall", async (event, options) => {
     const targetExe = path.join(normalized.installDir, APP_EXE);
     const targetUninstaller = path.join(normalized.installDir, UNINSTALLER_EXE);
 
-    emitProgress(event, 5, "准备卸载", normalized.installDir);
+    emitProgress(event, 5, "Preparing uninstall", normalized.installDir);
     await assertUninstallDirSafe(normalized.installDir);
 
-    emitProgress(event, 18, "关闭运行中的 Novayxk", "正在释放被占用的文件");
+    emitProgress(event, 18, "Closing running Novayxk processes", "Releasing files that are still in use");
     await closeRunningAppProcesses();
 
-    emitProgress(event, 36, "移除快捷方式", "桌面与开始菜单入口");
+    emitProgress(event, 36, "Removing shortcuts", "Desktop and Start menu entries");
     await removeShellArtifacts();
 
-    emitProgress(event, 58, "清理系统卸载入口", "Windows 应用和功能");
+    emitProgress(event, 58, "Cleaning uninstall entry", "Windows Apps & Features");
     await removeUninstallRegistry();
 
-    emitProgress(event, 72, "安排目录清理", "关闭窗口后完成最终删除");
+    emitProgress(event, 72, "Scheduling directory cleanup", "Final deletion will complete after the window closes");
     pendingUninstallCleanup = {
       installDir: normalized.installDir,
       deleteUserData: normalized.deleteUserData,
@@ -285,8 +301,8 @@ ipcMain.handle("installer:uninstall", async (event, options) => {
     emitProgress(
       event,
       100,
-      "卸载准备完成",
-      normalized.deleteUserData ? "关闭窗口后会同时删除 .novayxk 数据" : "关闭窗口后会保留 .novayxk 数据",
+      "Uninstall is ready",
+      normalized.deleteUserData ? ".novayxk data will also be deleted after the window closes" : ".novayxk data will be kept after the window closes",
     );
     return {
       ok: true,
@@ -327,7 +343,7 @@ async function getPayloadDir(event) {
     }
 
     const extractedPayloadDir = path.join(app.getPath("temp"), `novayxk-installer-payload-${app.getVersion()}`, "win-unpacked");
-    emitProgress(event, 4, "解包安装资源", "正在准备 Novayxk 主程序");
+    emitProgress(event, 4, "Extracting installation resources", "Preparing the Novayxk application files");
     await removePath(path.dirname(extractedPayloadDir));
     await fs.mkdir(extractedPayloadDir, { recursive: true });
     const payloadArchive = await copyPayloadArchiveToTemp();
@@ -344,7 +360,7 @@ async function getPayloadDir(event) {
 
 function normalizeInstallOptions(options) {
   const installDir = normalizeInstallDir(options?.installDir || getDefaultInstallDir());
-  if (!installDir) throw new Error("安装目录不能为空。");
+  if (!installDir) throw new Error("Install directory cannot be empty.");
 
   return {
     installDir,
@@ -356,7 +372,7 @@ function normalizeInstallOptions(options) {
 
 function normalizeInstallDir(rawInstallDir) {
   const raw = String(rawInstallDir || "").trim();
-  if (!raw) throw new Error("安装目录不能为空。");
+  if (!raw) throw new Error("Install directory cannot be empty.");
   if (isDriveRootInput(raw)) {
     return path.join(`${raw.slice(0, 2)}\\`, INSTALL_DIR_NAME);
   }
@@ -385,7 +401,7 @@ function trimTrailingSeparators(value) {
 
 function normalizeUninstallOptions(options) {
   const installDir = path.resolve(String(options?.installDir || uninstallTargetArg || getDefaultInstallDir()).trim());
-  if (!installDir) throw new Error("卸载目录不能为空。");
+  if (!installDir) throw new Error("Uninstall directory cannot be empty.");
 
   return {
     installDir,
@@ -429,10 +445,10 @@ function createInstallDirectoryBusyError(error, installDir) {
   if (!isBusyPathError(error)) return error;
   const friendly = new Error(
     [
-      "安装目录正在被占用，暂时无法替换旧版本。",
+      "The install directory is currently in use, so the previous version cannot be replaced yet.",
       "",
-      `请先关闭正在运行的 Novayxk、卸载器，以及打开 ${installDir} 的资源管理器或终端窗口，然后重新点击“开始安装”。`,
-      "如果仍然失败，请重启电脑后第一时间运行安装器。",
+      `Close any running Novayxk windows, the uninstaller, and any File Explorer or terminal windows opened at ${installDir}, then click "Start Installation" again.`,
+      "If it still fails, restart the computer and run the installer again right away.",
     ].join("\n"),
   );
   friendly.code = "INSTALL_DIR_BUSY";
@@ -447,7 +463,7 @@ function isBusyPathError(error) {
 function formatInstallerError(error, installDir) {
   if (error?.code === "INSTALL_DIR_BUSY") return error.message;
   if (isBusyPathError(error)) return createInstallDirectoryBusyError(error, installDir || getDefaultInstallDir()).message;
-  return error instanceof Error ? error.message : "安装失败。";
+  return error instanceof Error ? error.message : "Installation failed.";
 }
 
 async function assertInstallDirSafe(installDir) {
@@ -462,13 +478,13 @@ async function assertInstallDirSafe(installDir) {
   ]);
 
   if (forbidden.has(resolved)) {
-    throw new Error("这个目录过于宽泛，请选择 Novayxk 专用文件夹。");
+    throw new Error("This directory is too broad. Please choose a dedicated Novayxk folder.");
   }
 
   const marker = path.join(installDir, APP_EXE);
   const entries = await diskFs.readdir(installDir).catch(() => []);
   if (entries.length > 0 && !(await diskPathExists(marker)) && path.basename(installDir).toLowerCase() !== "novayxk") {
-    throw new Error("所选目录已有其他文件。为避免覆盖，请选择空目录或名为 Novayxk 的专用目录。");
+    throw new Error("The selected directory already contains other files. To avoid overwriting them, choose an empty directory or a dedicated folder named Novayxk.");
   }
 }
 
@@ -477,7 +493,7 @@ async function assertUninstallDirSafe(installDir) {
   const appMarker = path.join(installDir, APP_EXE);
   const uninstallerMarker = path.join(installDir, UNINSTALLER_EXE);
   if (!(await diskPathExists(appMarker)) && !(await diskPathExists(uninstallerMarker))) {
-    throw new Error("没有在这个目录里找到 Novayxk 主程序或卸载器。");
+    throw new Error("The Novayxk app or uninstaller was not found in this directory.");
   }
 }
 
@@ -560,7 +576,7 @@ async function copyPayloadArchiveToTemp() {
   ];
   const archive = await findExistingPath(candidates);
   if (!archive) {
-    throw new Error(`安装资源包不存在。已检查：${candidates.join("；")}`);
+    throw new Error(`Installation resource archive was not found. Checked: ${candidates.join("; ")}`);
   }
 
   const tempArchive = path.join(app.getPath("temp"), `novayxk-payload-${app.getVersion()}.zip`);
@@ -618,7 +634,7 @@ function runCommand(command, args) {
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(output.trim() || `${command} 退出码 ${code}`));
+        reject(new Error(output.trim() || `${command} exited with code ${code}`));
       }
     });
   });
@@ -780,7 +796,7 @@ async function findCleanupHelper() {
   for (const candidate of candidates) {
     if (candidate && (await pathExists(candidate))) return candidate;
   }
-  throw new Error(`没有找到 ${CLEANUP_EXE}，请重新打包安装。`);
+  throw new Error(`${CLEANUP_EXE} was not found. Please rebuild the installer package.`);
 }
 
 async function launchCleanupHelper({ installDir, deleteUserData, userDataDir }) {

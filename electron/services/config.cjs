@@ -1,11 +1,13 @@
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 
-function getDefaultConfig() {
+function getDefaultConfig(defaultLanguage = "en") {
   return {
     providers: [],
     activeProviderId: null,
     lastProjectRoot: null,
+    language: normalizeLanguage(defaultLanguage),
+    languagePreferenceSource: "system",
     theme: "dark",
     aiControlMode: "safe",
     assistantMode: "standard",
@@ -39,6 +41,14 @@ function normalizeAssistantMode(value) {
   return "standard";
 }
 
+function normalizeLanguage(value) {
+  return value === "zh-CN" ? "zh-CN" : "en";
+}
+
+function normalizeLanguagePreferenceSource(value) {
+  return value === "user" ? "user" : "system";
+}
+
 function isLikelyImageModelName(model) {
   return /(?:^|[\W_])(?:gpt-image|dall-e|image-generation|imagen|flux|sdxl|stable-diffusion|stable_image)(?:$|[\W_])/i.test(
     String(model || "").trim(),
@@ -51,7 +61,7 @@ function normalizeProvider(provider, index, safeStorage) {
   const apiMode = normalizeApiMode(provider?.apiMode);
   return {
     id: String(provider?.id || `provider-${index + 1}`),
-    name: String(provider?.name || `供应商 ${index + 1}`),
+    name: String(provider?.name || `Provider ${index + 1}`),
     baseUrl: String(provider?.baseUrl || ""),
     apiKey,
     model,
@@ -59,16 +69,26 @@ function normalizeProvider(provider, index, safeStorage) {
   };
 }
 
-function normalizeConfig(rawConfig, safeStorage) {
-  const fallback = getDefaultConfig();
+function normalizeConfig(rawConfig, safeStorage, defaultLanguage = "en") {
+  const fallback = getDefaultConfig(defaultLanguage);
   const providers = Array.isArray(rawConfig?.providers)
     ? rawConfig.providers.map((provider, index) => normalizeProvider(provider, index, safeStorage))
     : fallback.providers;
+  const inferredLanguagePreferenceSource =
+    rawConfig && typeof rawConfig === "object" && "languagePreferenceSource" in rawConfig
+      ? normalizeLanguagePreferenceSource(rawConfig?.languagePreferenceSource)
+      : rawConfig?.language === "zh-CN"
+        ? "user"
+        : "system";
+  const normalizedStoredLanguage = normalizeLanguage(rawConfig?.language);
+  const resolvedLanguage = inferredLanguagePreferenceSource === "user" ? normalizedStoredLanguage : fallback.language;
 
   return {
     providers,
     activeProviderId: typeof rawConfig?.activeProviderId === "string" ? rawConfig.activeProviderId : fallback.activeProviderId,
     lastProjectRoot: typeof rawConfig?.lastProjectRoot === "string" ? rawConfig.lastProjectRoot : fallback.lastProjectRoot,
+    language: resolvedLanguage,
+    languagePreferenceSource: inferredLanguagePreferenceSource,
     theme: rawConfig?.theme === "light" ? "light" : fallback.theme,
     aiControlMode: rawConfig?.aiControlMode === "full" ? "full" : fallback.aiControlMode,
     assistantMode: normalizeAssistantMode(rawConfig?.assistantMode),
@@ -144,8 +164,8 @@ function encodeStoredApiKey(apiKey, safeStorage) {
   };
 }
 
-function buildDiskConfig(config, safeStorage) {
-  const normalized = normalizeConfig(config, safeStorage);
+function buildDiskConfig(config, safeStorage, defaultLanguage = "en") {
+  const normalized = normalizeConfig(config, safeStorage, defaultLanguage);
   return {
     providers: normalized.providers.map((provider) => ({
       id: provider.id,
@@ -157,6 +177,8 @@ function buildDiskConfig(config, safeStorage) {
     })),
     activeProviderId: normalized.activeProviderId,
     lastProjectRoot: normalized.lastProjectRoot,
+    language: normalized.language,
+    languagePreferenceSource: normalized.languagePreferenceSource,
     theme: normalized.theme,
     aiControlMode: normalized.aiControlMode,
     assistantMode: normalized.assistantMode,
@@ -173,7 +195,15 @@ function needsConfigMigration(rawConfig) {
   return rawConfig.providers.some((provider) => typeof provider?.apiKey === "string" && provider.apiKey.length > 0);
 }
 
-function createConfigService({ configDir, configFile, logApp, safeStorage }) {
+function createConfigService({ configDir, configFile, logApp, safeStorage, getDefaultLanguage }) {
+  function resolveDefaultLanguage() {
+    try {
+      return normalizeLanguage(getDefaultLanguage?.());
+    } catch {
+      return "en";
+    }
+  }
+
   function persistDiskConfigSync(config) {
     fsSync.mkdirSync(configDir, { recursive: true });
     fsSync.writeFileSync(configFile, JSON.stringify(config, null, 2), "utf8");
@@ -189,7 +219,7 @@ function createConfigService({ configDir, configFile, logApp, safeStorage }) {
       const raw = fsSync.readFileSync(configFile, "utf8");
       return JSON.parse(raw);
     } catch {
-      return getDefaultConfig();
+      return getDefaultConfig(resolveDefaultLanguage());
     }
   }
 
@@ -198,14 +228,14 @@ function createConfigService({ configDir, configFile, logApp, safeStorage }) {
       const raw = await fs.readFile(configFile, "utf8");
       return JSON.parse(raw);
     } catch {
-      return getDefaultConfig();
+      return getDefaultConfig(resolveDefaultLanguage());
     }
   }
 
   function migrateIfNeededSync(rawConfig) {
     if (!needsConfigMigration(rawConfig)) return;
     try {
-      persistDiskConfigSync(buildDiskConfig(rawConfig, safeStorage));
+      persistDiskConfigSync(buildDiskConfig(rawConfig, safeStorage, resolveDefaultLanguage()));
     } catch {
       // Keep the in-memory config usable even if the migration write fails.
     }
@@ -214,31 +244,36 @@ function createConfigService({ configDir, configFile, logApp, safeStorage }) {
   async function migrateIfNeeded(rawConfig) {
     if (!needsConfigMigration(rawConfig)) return;
     try {
-      await persistDiskConfig(buildDiskConfig(rawConfig, safeStorage));
+      await persistDiskConfig(buildDiskConfig(rawConfig, safeStorage, resolveDefaultLanguage()));
     } catch {
       // Keep the in-memory config usable even if the migration write fails.
     }
   }
 
   function readConfigSync() {
+    const defaultLanguage = resolveDefaultLanguage();
     const rawConfig = readParsedConfigSync();
     migrateIfNeededSync(rawConfig);
-    return normalizeConfig(rawConfig, safeStorage);
+    return normalizeConfig(rawConfig, safeStorage, defaultLanguage);
   }
 
   async function readConfig() {
+    const defaultLanguage = resolveDefaultLanguage();
     const rawConfig = await readParsedConfig();
     await migrateIfNeeded(rawConfig);
-    return normalizeConfig(rawConfig, safeStorage);
+    return normalizeConfig(rawConfig, safeStorage, defaultLanguage);
   }
 
   async function writeConfig(config) {
-    const diskConfig = buildDiskConfig(config, safeStorage);
+    const defaultLanguage = resolveDefaultLanguage();
+    const diskConfig = buildDiskConfig(config, safeStorage, defaultLanguage);
     await persistDiskConfig(diskConfig);
     logApp("config:saved", {
       providerCount: Array.isArray(diskConfig?.providers) ? diskConfig.providers.length : 0,
       activeProviderId: diskConfig?.activeProviderId || null,
       theme: diskConfig?.theme || null,
+      language: diskConfig?.language || null,
+      languagePreferenceSource: diskConfig?.languagePreferenceSource || null,
       aiControlMode: diskConfig?.aiControlMode || null,
       assistantMode: diskConfig?.assistantMode || null,
       browserShowAdvancedControls: diskConfig?.browserShowAdvancedControls === true,
@@ -259,7 +294,7 @@ function createConfigService({ configDir, configFile, logApp, safeStorage }) {
         ? diskConfig.providers.filter((provider) => provider.apiKeyStorage === "safeStorage").length
         : 0,
     });
-    return normalizeConfig(config, safeStorage);
+    return normalizeConfig(config, safeStorage, defaultLanguage);
   }
 
   return { readConfig, readConfigSync, writeConfig };

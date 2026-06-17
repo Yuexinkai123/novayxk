@@ -103,9 +103,9 @@ export function useBrowserWorkspace({ setStatus }: UseBrowserWorkspaceOptions) {
       if (snapshot) {
         setBrowserSnapshot(snapshot);
       }
-      setStatus(`浏览器已打开：${nextUrl}`);
+      setStatus(`Browser opened: ${nextUrl}`);
     } catch (error) {
-      setStatus(formatActionableError(error, "打开浏览器地址失败"));
+      setStatus(formatActionableError(error, "Failed to open the browser URL"));
     }
   }, [browserUrlInput, setStatus]);
 
@@ -122,7 +122,7 @@ export function useBrowserWorkspace({ setStatus }: UseBrowserWorkspaceOptions) {
           setBrowserSnapshot(snapshot);
         }
       } catch (error) {
-        setStatus(formatActionableError(error, "执行浏览器导航命令失败"));
+        setStatus(formatActionableError(error, "Failed to execute the browser navigation command"));
       }
     },
     [setStatus],
@@ -133,9 +133,9 @@ export function useBrowserWorkspace({ setStatus }: UseBrowserWorkspaceOptions) {
       await window.novayxk?.browserClearLogs();
       setBrowserActionLog([]);
       setBrowserNetworkLog([]);
-      setStatus("已清空浏览器操作与网络日志");
+      setStatus("Cleared browser action and network logs");
     } catch (error) {
-      setStatus(formatActionableError(error, "清空浏览器日志失败"));
+      setStatus(formatActionableError(error, "Failed to clear browser logs"));
     }
   }, [setStatus]);
 
@@ -193,7 +193,7 @@ export function useBrowserWorkspace({ setStatus }: UseBrowserWorkspaceOptions) {
     async (action: BrowserAutomationAction) => {
       const result = await executeBrowserAutomationAction(action);
       const label = action.type === "navigate" ? action.url : result.preview;
-      setStatus(result.ok ? `浏览器动作完成：${label}` : `浏览器动作失败：${result.preview}`);
+      setStatus(result.ok ? `Browser action completed: ${label}` : `Browser action failed: ${result.preview}`);
       return result;
     },
     [executeBrowserAutomationAction, setStatus],
@@ -241,7 +241,7 @@ export function useBrowserWorkspace({ setStatus }: UseBrowserWorkspaceOptions) {
         .catch((error) => {
           window.novayxk?.replyBrowserWorkspaceCommand(requestId, {
             ok: false,
-            error: error instanceof Error ? error.message : "浏览器工作区命令执行失败",
+            error: error instanceof Error ? error.message : "Browser workspace command execution failed",
           });
         });
     });

@@ -1,15 +1,18 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, Bot, Brain, ChevronsRight, Copy, ExternalLink, Gauge, History, Image as ImageIcon, KeyRound, Leaf, Pencil, Plus, RotateCcw, Save, Send, Square, X } from "lucide-react";
-import type { AssistantMode, ChatMessage, GeneratedImageAttachment, TaskSummary } from "../../vite-env";
+import type { AppLanguage, AssistantMode, ChatMessage, GeneratedImageAttachment, TaskSummary } from "../../vite-env";
 import { formatElapsedSeconds } from "../../ai/providers";
-import { formatTokenUsage } from "../../ai/tokens";
 import { formatTaskLabel, stripContext } from "../../ai/chat";
-import { getAssistantModeLabel, getAssistantModeTitle } from "../../app/product";
+import { getLocaleStrings } from "../../app/i18n";
 import { MarkdownView } from "../MarkdownView";
+
+type AssistantStrings = ReturnType<typeof getLocaleStrings>["assistant"];
+type AssistantImageStrings = AssistantStrings["images"];
 
 type AssistantPanelProps = {
   isCollapsed: boolean;
+  language: AppLanguage;
   model: string;
   assistantMode: AssistantMode;
   hasProject: boolean;
@@ -44,6 +47,7 @@ type AssistantPanelProps = {
 
 export function AssistantPanel({
   isCollapsed,
+  language,
   model,
   assistantMode,
   hasProject,
@@ -81,6 +85,7 @@ export function AssistantPanel({
   const lastSubmittedPromptRef = React.useRef("");
   const modeMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [isModeMenuOpen, setIsModeMenuOpen] = React.useState(false);
+  const strings = getLocaleStrings(language).assistant;
 
   const submitPrompt = React.useCallback(() => {
     const currentPrompt = promptInputRef.current?.value ?? prompt;
@@ -143,7 +148,7 @@ export function AssistantPanel({
           {/* <span>助手</span> */}
           <strong>{model}</strong>
         </div>
-        <button className="panel-collapse-button" onClick={onCollapse} title="隐藏助手栏">
+        <button className="panel-collapse-button" onClick={onCollapse} title={strings.hidePanel}>
           <ChevronsRight size={15} />
         </button>
       </div>
@@ -158,9 +163,9 @@ export function AssistantPanel({
               else onStartNewTask();
             }}
             disabled={!hasProject}
-            aria-label="选择任务历史"
+            aria-label={strings.chooseTaskHistory}
           >
-            <option value="">新任务</option>
+            <option value="">{strings.newTask}</option>
             {tasks.map((task) => (
               <option key={task.id} value={task.id}>
                 {formatTaskLabel(task)}
@@ -173,15 +178,15 @@ export function AssistantPanel({
             onChange={(event) => onTaskTitleChange(event.target.value)}
             onBlur={onTaskTitleBlur}
             disabled={!hasProject}
-            aria-label="任务标题"
+            aria-label={strings.taskTitle}
           />
-          <button className="task-icon-button" onClick={onSaveCurrentTask} disabled={!hasProject} title="保存任务">
+          <button className="task-icon-button" onClick={onSaveCurrentTask} disabled={!hasProject} title={strings.saveTask}>
             <Save size={15} />
           </button>
-          <button className="task-icon-button" onClick={onStartNewTask} disabled={!hasProject} title="新建任务">
+          <button className="task-icon-button" onClick={onStartNewTask} disabled={!hasProject} title={strings.createNewTask}>
             <Plus size={15} />
           </button>
-          <button className="task-icon-button" onClick={onOpenMemory} disabled={!hasProject} title="项目记忆">
+          <button className="task-icon-button" onClick={onOpenMemory} disabled={!hasProject} title={strings.projectMemory}>
             <BookOpen size={15} />
           </button>
         </div>
@@ -189,8 +194,8 @@ export function AssistantPanel({
           <History size={13} />
           <span>
             {activeTask
-              ? `${activeTask.messageCount} 条消息 / ${tasks.length} 份历史`
-              : `${projectMemoryLength} 字项目记忆`}
+              ? `${activeTask.messageCount} ${strings.messages} / ${tasks.length} ${strings.savedTasks}`
+              : `${projectMemoryLength} ${strings.projectMemoryChars}`}
           </span>
         </div>
       </div>
@@ -205,16 +210,16 @@ export function AssistantPanel({
                   type="button"
                   className={`message-edit-button ${editingMessageIndex === index ? "active" : ""}`}
                   onClick={() => onEditPreviousPrompt(index)}
-                  title="修改并重发上一条问题"
+                  title={strings.editLastPrompt}
                   disabled={isLoading}
                 >
                   <Pencil size={13} />
                 </button>
               ) : null}
               <MarkdownView content={stripContext(message.content)} />
-              <MessageAttachments attachments={message.attachments} />
+              <MessageAttachments attachments={message.attachments} strings={strings.images} />
               {message.role === "assistant" ? (
-                <MessageMeta elapsedMs={message.elapsedMs} tokenUsage={message.tokenUsage} />
+                <MessageMeta elapsedMs={message.elapsedMs} tokenUsage={message.tokenUsage} strings={strings} />
               ) : null}
             </div>
           </article>
@@ -225,8 +230,8 @@ export function AssistantPanel({
               <Bot size={16} />
             </div>
             <div className="message-body">
-              <MarkdownView content="正在处理..." />
-              <div className="message-meta">已处理 {formatElapsedSeconds(loadingElapsedMs)}</div>
+              <MarkdownView content={strings.working} />
+              <div className="message-meta">{strings.elapsed} {formatElapsedSeconds(loadingElapsedMs)}</div>
             </div>
           </article>
         )}
@@ -235,7 +240,7 @@ export function AssistantPanel({
       <div className="prompt-box">
         <textarea
           ref={promptInputRef}
-          aria-label="助手输入框"
+          aria-label={strings.inputLabel}
           value={prompt}
           onChange={(event) => {
             if (isSubmittingPromptRef.current && event.target.value === lastSubmittedPromptRef.current) {
@@ -260,8 +265,8 @@ export function AssistantPanel({
           }}
           placeholder={
             isModelReady
-              ? "发消息.."
-              : "先到“设置”里配置模型连接，测试通过后再开始对话"
+              ? strings.sendPlaceholder
+              : strings.configureModelPlaceholder
           }
         />
         <div className="prompt-mode-control" ref={modeMenuRef}>
@@ -269,19 +274,20 @@ export function AssistantPanel({
             type="button"
             className={`prompt-mode-button ${assistantMode}`}
             onClick={() => setIsModeMenuOpen((value) => !value)}
-            title={`助手模式：${getAssistantModeLabel(assistantMode)}。点击切换模式`}
-            aria-label={`助手模式：${getAssistantModeLabel(assistantMode)}`}
+            title={`${strings.modePrefix}: ${strings.modes[assistantMode].label}. ${strings.clickToSwitch}.`}
+            aria-label={`${strings.modePrefix}: ${strings.modes[assistantMode].label}`}
             aria-haspopup="menu"
             aria-expanded={isModeMenuOpen}
           >
             {assistantMode === "low" ? <Leaf size={18} /> : assistantMode === "deep" ? <Brain size={18} /> : <Gauge size={18} />}
           </button>
           {isModeMenuOpen ? (
-            <div className="prompt-mode-menu" role="menu" aria-label="选择助手模式">
+            <div className="prompt-mode-menu" role="menu" aria-label={strings.chooseMode}>
               <PromptModeMenuItem
                 mode="low"
                 activeMode={assistantMode}
                 icon={<Leaf size={15} />}
+                strings={strings}
                 onSelect={(mode) => {
                   setIsModeMenuOpen(false);
                   void onAssistantModeChange(mode);
@@ -291,6 +297,7 @@ export function AssistantPanel({
                 mode="standard"
                 activeMode={assistantMode}
                 icon={<Gauge size={15} />}
+                strings={strings}
                 onSelect={(mode) => {
                   setIsModeMenuOpen(false);
                   void onAssistantModeChange(mode);
@@ -300,6 +307,7 @@ export function AssistantPanel({
                 mode="deep"
                 activeMode={assistantMode}
                 icon={<Brain size={15} />}
+                strings={strings}
                 onSelect={(mode) => {
                   setIsModeMenuOpen(false);
                   void onAssistantModeChange(mode);
@@ -312,7 +320,7 @@ export function AssistantPanel({
           className={`send-button ${isLoading ? "stop" : ""}`}
           onClick={isLoading ? onStopGeneration : submitPrompt}
           disabled={isLoading ? isStopping : !prompt.trim() || !isModelReady}
-          title={isLoading ? (runningTerminalTaskCount ? "停止生成和终端任务" : "停止生成") : "发送"}
+          title={isLoading ? (runningTerminalTaskCount ? strings.stopGenerationAndTasks : strings.stopGeneration) : strings.send}
         >
           {isLoading ? <Square size={16} /> : <Send size={18} />}
         </button>
@@ -325,11 +333,13 @@ function PromptModeMenuItem({
   mode,
   activeMode,
   icon,
+  strings,
   onSelect,
 }: {
   mode: AssistantMode;
   activeMode: AssistantMode;
   icon: React.ReactNode;
+  strings: AssistantStrings;
   onSelect: (mode: AssistantMode) => void;
 }) {
   return (
@@ -339,10 +349,10 @@ function PromptModeMenuItem({
       aria-checked={mode === activeMode}
       className={mode === activeMode ? "active" : ""}
       onClick={() => onSelect(mode)}
-      title={getAssistantModeTitle(mode)}
+      title={strings.modes[mode].title}
     >
       {icon}
-      <span>{getAssistantModeLabel(mode)}</span>
+      <span>{strings.modes[mode].label}</span>
     </button>
   );
 }
@@ -350,19 +360,26 @@ function PromptModeMenuItem({
 function MessageMeta({
   elapsedMs,
   tokenUsage,
+  strings,
 }: {
   elapsedMs?: number;
   tokenUsage?: ChatMessage["tokenUsage"];
+  strings: AssistantStrings;
 }) {
   const parts = [
-    typeof elapsedMs === "number" ? `处理 ${formatElapsedSeconds(elapsedMs)}` : "",
-    tokenUsage ? formatTokenUsage(tokenUsage) : "",
+    typeof elapsedMs === "number" ? `${strings.elapsed} ${formatElapsedSeconds(elapsedMs)}` : "",
+    tokenUsage ? formatLocalizedTokenUsage(tokenUsage, strings) : "",
   ].filter(Boolean);
   if (!parts.length) return null;
   return <div className="message-meta">{parts.join(" / ")}</div>;
 }
 
-function MessageAttachments({ attachments }: { attachments?: GeneratedImageAttachment[] }) {
+function formatLocalizedTokenUsage(tokenUsage: NonNullable<ChatMessage["tokenUsage"]>, strings: AssistantStrings) {
+  const prefix = tokenUsage.estimated === false ? strings.tokens : strings.approxTokens;
+  return `${prefix} ${tokenUsage.totalTokens.toLocaleString()} (${strings.inputTokens} ${tokenUsage.promptTokens.toLocaleString()} / ${strings.outputTokens} ${tokenUsage.completionTokens.toLocaleString()})`;
+}
+
+function MessageAttachments({ attachments, strings }: { attachments?: GeneratedImageAttachment[]; strings: AssistantImageStrings }) {
   const images = attachments?.filter((attachment) => attachment.type === "image") ?? [];
   const [previewImage, setPreviewImage] = React.useState<GeneratedImageAttachment | null>(null);
   const [contextMenu, setContextMenu] = React.useState<{
@@ -426,9 +443,9 @@ function MessageAttachments({ attachments }: { attachments?: GeneratedImageAttac
               className="message-image-preview-button"
               onClick={() => setPreviewImage(image)}
               onContextMenu={(event) => openImageContextMenu(event, image)}
-              title="预览图片"
+              title={strings.previewImage}
             >
-              <img src={image.url} alt={image.prompt || "生成图片"} loading="lazy" />
+              <img src={image.url} alt={image.prompt || strings.generatedImage} loading="lazy" />
             </button>
             <figcaption>
               <span>
@@ -440,7 +457,7 @@ function MessageAttachments({ attachments }: { attachments?: GeneratedImageAttac
                 onClick={() => {
                   void window.novayxk?.openGeneratedImage(image.path);
                 }}
-                title="打开生成图片文件"
+                title={strings.openGeneratedImageFile}
               >
                 <ExternalLink size={13} />
               </button>
@@ -452,6 +469,7 @@ function MessageAttachments({ attachments }: { attachments?: GeneratedImageAttac
         ? createPortal(
             <ImagePreviewModal
               image={previewImage}
+              strings={strings}
               onClose={() => setPreviewImage(null)}
               onContextMenu={(event) => openImageContextMenu(event, previewImage)}
             />,
@@ -468,6 +486,7 @@ function MessageAttachments({ attachments }: { attachments?: GeneratedImageAttac
                 void window.novayxk?.openGeneratedImage(contextMenu.image.path);
               }}
               onClose={() => setContextMenu(null)}
+              strings={strings}
             />,
             document.body,
           )
@@ -478,10 +497,12 @@ function MessageAttachments({ attachments }: { attachments?: GeneratedImageAttac
 
 function ImagePreviewModal({
   image,
+  strings,
   onClose,
   onContextMenu,
 }: {
   image: GeneratedImageAttachment;
+  strings: AssistantImageStrings;
   onClose: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
 }) {
@@ -567,11 +588,11 @@ function ImagePreviewModal({
         className="image-preview-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="图片预览"
+        aria-label={strings.imagePreview}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="image-preview-toolbar">
-          <button type="button" onClick={resetView} title="重置视图">
+          <button type="button" onClick={resetView} title={strings.resetView}>
             <RotateCcw size={16} />
           </button>
           <button
@@ -579,11 +600,11 @@ function ImagePreviewModal({
             onClick={() => {
               void window.novayxk?.openGeneratedImage(image.path);
             }}
-            title="打开生成图片文件"
+            title={strings.openGeneratedImageFile}
           >
             <ExternalLink size={16} />
           </button>
-          <button type="button" onClick={onClose} title="关闭">
+          <button type="button" onClick={onClose} title={strings.close}>
             <X size={18} />
           </button>
         </div>
@@ -599,7 +620,7 @@ function ImagePreviewModal({
         >
           <img
             src={image.url}
-            alt={image.prompt || "生成图片"}
+            alt={image.prompt || strings.generatedImage}
             draggable={false}
             onContextMenu={onContextMenu}
             style={{
@@ -626,12 +647,14 @@ function ImageAttachmentContextMenu({
   onCopy,
   onOpen,
   onClose,
+  strings,
 }: {
   x: number;
   y: number;
   onCopy: () => Promise<void>;
   onOpen: () => void;
   onClose: () => void;
+  strings: AssistantImageStrings;
 }) {
   const style = React.useMemo(
     () => ({
@@ -646,7 +669,7 @@ function ImageAttachmentContextMenu({
       className="image-context-menu"
       style={style}
       role="menu"
-      aria-label="图片菜单"
+      aria-label={strings.imageMenu}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
@@ -659,7 +682,7 @@ function ImageAttachmentContextMenu({
         }}
       >
         <Copy size={14} />
-        复制
+        {strings.copy}
       </button>
       <button
         type="button"
@@ -670,7 +693,7 @@ function ImageAttachmentContextMenu({
         }}
       >
         <ExternalLink size={14} />
-        打开
+        {strings.open}
       </button>
     </div>
   );

@@ -6,10 +6,10 @@ const { detectCommandScope, inspectCommand, inspectCommandForMode } = require(".
 
 describe("detectCommandScope", () => {
   it("routes software and URL tasks as system commands", () => {
-    expect(detectCommandScope('winget search "优酷"')).toBe("system");
-    expect(detectCommandScope('cmd /c "winget search 优酷"')).toBe("system");
+    expect(detectCommandScope('winget search "Youku"')).toBe("system");
+    expect(detectCommandScope('cmd /c "winget search Youku"')).toBe("system");
     expect(detectCommandScope('Start-Process "https://youku.com/product"')).toBe("system");
-    expect(detectCommandScope('Start-Process "ms-windows-store://search/?query=优酷"')).toBe("system");
+    expect(detectCommandScope('Start-Process "ms-windows-store://search/?query=Youku"')).toBe("system");
   });
 
   it("keeps project development commands in the project scope", () => {
@@ -20,11 +20,11 @@ describe("detectCommandScope", () => {
   it("blocks recursive deletes in safe mode even without force", () => {
     expect(inspectCommand("Remove-Item .\\dist -Recurse")).toMatchObject({
       allowed: false,
-      reason: "包含递归删除",
+      reason: "This includes recursive deletion.",
     });
     expect(inspectCommand("rd /s build")).toMatchObject({
       allowed: false,
-      reason: "包含递归删除",
+      reason: "This includes recursive deletion.",
     });
   });
 

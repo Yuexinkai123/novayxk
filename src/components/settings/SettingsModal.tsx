@@ -1,7 +1,8 @@
 import React from "react";
 import { Check, MonitorCog, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, WandSparkles } from "lucide-react";
-import type { ProviderConfig } from "../../vite-env";
+import type { AppLanguage, ProviderConfig } from "../../vite-env";
 import { inferProviderApiMode, isLikelyImageModel } from "../../ai/providers";
+import { getLocaleStrings } from "../../app/i18n";
 
 export type PrivilegeState = {
   platform: string;
@@ -11,6 +12,7 @@ export type PrivilegeState = {
 };
 
 type SettingsModalProps = {
+  language: AppLanguage;
   providers: ProviderConfig[];
   activeProviderId: string;
   editingProvider: ProviderConfig;
@@ -29,12 +31,14 @@ type SettingsModalProps = {
   onTestProvider: () => void;
   onReloadModels: () => void;
   onToggleBrowserShowAdvancedControls: (value: boolean) => void;
+  onLanguageChange: (next: AppLanguage) => void;
   onRestartAsAdmin: () => void;
   onClose: () => void;
   onSave: () => void;
 };
 
 export function SettingsModal({
+  language,
   providers,
   activeProviderId,
   editingProvider,
@@ -53,11 +57,13 @@ export function SettingsModal({
   onTestProvider,
   onReloadModels,
   onToggleBrowserShowAdvancedControls,
+  onLanguageChange,
   onRestartAsAdmin,
   onClose,
   onSave,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = React.useState<"models" | "browser" | "system">("models");
+  const locale = getLocaleStrings(language).settings;
   const modelOptions = React.useMemo(() => {
     return [...new Set(providerModelOptions.map((model) => model.trim()).filter(Boolean))];
   }, [editingProvider.model, providerModelOptions]);
@@ -65,13 +71,13 @@ export function SettingsModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="settings-modal" role="dialog" aria-modal="true" aria-label="模型供应商设置">
+      <section className="settings-modal" role="dialog" aria-modal="true" aria-label={locale.dialogLabel}>
         <div className="modal-header">
           <div>
-            <span>模型与系统</span>
+            <span>{locale.header}</span>
             {/* <h2>连接模型服务，管理系统级权限</h2> */}
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭设置">
+          <button className="icon-button" onClick={onClose} aria-label={locale.close}>
             <Check size={18} />
           </button>
         </div>
@@ -79,15 +85,15 @@ export function SettingsModal({
         <div className="settings-section-tabs">
           <button className={activeTab === "models" ? "active" : ""} onClick={() => setActiveTab("models")}>
             <WandSparkles size={15} />
-            模型
+            {locale.tabs.models}
           </button>
           <button className={activeTab === "browser" ? "active" : ""} onClick={() => setActiveTab("browser")}>
             <MonitorCog size={15} />
-            浏览器
+            {locale.tabs.browser}
           </button>
           <button className={activeTab === "system" ? "active" : ""} onClick={() => setActiveTab("system")}>
             <ShieldCheck size={15} />
-            系统
+            {locale.tabs.system}
           </button>
         </div>
 
@@ -106,7 +112,7 @@ export function SettingsModal({
                 ))}
                 <button onClick={onAddProvider}>
                   <Plus size={15} />
-                  新增
+                  {locale.provider.new}
                 </button>
               </div>
 
@@ -115,20 +121,20 @@ export function SettingsModal({
                   className="ghost-button danger-button"
                   onClick={onRemoveProvider}
                   disabled={providers.length <= 1}
-                  title={providers.length <= 1 ? "至少保留一个供应商配置" : `删除 ${editingProvider.name}`}
+                  title={providers.length <= 1 ? locale.provider.keepAtLeastOne : `${locale.provider.deleteCurrent}: ${editingProvider.name}`}
                 >
                   <Trash2 size={16} />
-                  删除当前供应商
+                  {locale.provider.deleteCurrent}
                 </button>
-                <span>{providers.length <= 1 ? "至少保留一个供应商配置。" : "删除后会在保存配置时一并持久化。"}</span>
+                <span>{providers.length <= 1 ? locale.provider.keepAtLeastOne : locale.provider.deleteWithSettings}</span>
               </div>
 
               <label>
-                名称
+                {locale.provider.name}
                 <input value={editingProvider.name} onChange={(event) => onUpdateProvider({ name: event.target.value })} />
               </label>
               <label>
-                Base URL
+                {locale.provider.baseUrl}
                 <input
                   value={editingProvider.baseUrl}
                   onChange={(event) => onUpdateProvider({ baseUrl: event.target.value })}
@@ -136,7 +142,7 @@ export function SettingsModal({
                 />
               </label>
               <label>
-                API Key
+                {locale.provider.apiKey}
                 <input
                   type="password"
                   value={editingProvider.apiKey}
@@ -145,7 +151,7 @@ export function SettingsModal({
                 />
               </label>
               <label>
-                Model
+                {locale.provider.model}
                 <div className="provider-model-row">
                   <div className="provider-model-fields">
                     <div className="provider-model-select-row">
@@ -162,11 +168,11 @@ export function SettingsModal({
                         }}
                         disabled={isLoadingProviderModels || modelOptions.length === 0}
                       >
-                        <option value="">从列表选择</option>
+                        <option value="">{locale.provider.chooseFromList}</option>
                         {modelOptions.map((model) => (
                           <option key={model} value={model}>
                             {model}
-                            {isLikelyImageModel(model) ? "（图片）" : ""}
+                            {isLikelyImageModel(model) ? locale.provider.imageSuffix : ""}
                           </option>
                         ))}
                       </select>
@@ -175,10 +181,10 @@ export function SettingsModal({
                         type="button"
                         onClick={onReloadModels}
                         disabled={isLoadingProviderModels}
-                        title="重新读取模型列表"
+                        title={locale.provider.reloadModelList}
                       >
                         <RefreshCw size={16} />
-                        {isLoadingProviderModels ? "读取中" : "刷新模型"}
+                        {isLoadingProviderModels ? locale.provider.loading : locale.provider.refreshModels}
                       </button>
                     </div>
                     <input
@@ -202,75 +208,95 @@ export function SettingsModal({
               </label>
               {providerModelStatus ? <div className="provider-model-hint">{providerModelStatus}</div> : null}
               <label>
-                接口类型
+                {locale.provider.apiMode}
                 <select
                   className="settings-select"
                   value={editingProvider.apiMode ?? "chatCompletions"}
                   onChange={(event) => onUpdateProvider({ apiMode: event.target.value as ProviderConfig["apiMode"] })}
                 >
-                  <option value="chatCompletions">Chat Completions (/chat/completions)</option>
-                  <option value="responses">Responses API (/responses)</option>
-                  <option value="imageGenerations">图片生成 (/images/generations)</option>
+                  <option value="chatCompletions">{locale.provider.chatCompletions}</option>
+                  <option value="responses">{locale.provider.responses}</option>
+                  <option value="imageGenerations">{locale.provider.imageGeneration}</option>
                 </select>
               </label>
 
               <div className="provider-test-row">
                 <button className="ghost-button" onClick={onTestProvider} disabled={isTestingProvider}>
                   <Sparkles size={16} />
-                  测试连接
+                  {locale.provider.testConnection}
                 </button>
-                <span>{providerTestStatus || "保存前可以先测试供应商是否可用。API Key 会优先保存在当前 Windows 账户下的本地加密存储中。"}</span>
+                <span>{providerTestStatus || locale.provider.testHint}</span>
               </div>
             </>
           ) : null}
 
           {activeTab === "browser" ? (
             <div className="settings-card">
-              <span>浏览器工作区</span>
-              <strong>高级操作区显示</strong>
-              <p>控制脚本执行、选择器动作和调试输入区是否默认显示。关闭后，浏览器工作区会优先保留地址栏、网页和日志区域。</p>
+              <span>{locale.browser.title}</span>
+              <strong>{locale.browser.strong}</strong>
+              <p>{locale.browser.description}</p>
               <label className="settings-toggle">
                 <input
                   type="checkbox"
                   checked={browserShowAdvancedControls}
                   onChange={(event) => onToggleBrowserShowAdvancedControls(event.target.checked)}
                 />
-                <span>{browserShowAdvancedControls ? "默认显示高级操作区" : "默认隐藏高级操作区"}</span>
+                <span>{browserShowAdvancedControls ? locale.browser.showByDefault : locale.browser.hideByDefault}</span>
               </label>
             </div>
           ) : null}
 
           {activeTab === "system" ? (
-            <div className={`privilege-panel ${privilege?.isAdmin ? "admin" : ""}`}>
-              <div>
-                <span>Windows 系统权限</span>
-                <strong>{privilege?.isAdmin ? "当前可执行系统级操作" : "当前仅有普通系统权限"}</strong>
-                <p>
-                  {privilege?.isAdmin
-                    ? "安装软件、修改系统设置、处理注册表和受保护目录时，会直接使用当前管理员权限。"
-                    : "遇到安装软件、受保护目录或系统设置修改时，可以通过 Windows UAC 切换到管理员模式后重试。"}
-                </p>
+            <>
+              <div className="settings-card">
+                <span>{locale.system.languageTitle}</span>
+                <strong>{language === "zh-CN" ? locale.system.chinese : locale.system.english}</strong>
+                <p>{locale.system.languageDescription}</p>
+                <select
+                  className="settings-select"
+                  value={language}
+                  onChange={(event) => onLanguageChange(event.target.value as AppLanguage)}
+                >
+                  <option value="en">{locale.system.english}</option>
+                  <option value="zh-CN">{locale.system.chinese}</option>
+                </select>
               </div>
-              <button
-                className="ghost-button"
-                onClick={onRestartAsAdmin}
-                disabled={Boolean(privilege?.isAdmin) || !privilege?.canElevate || isRestartingAsAdmin}
-                title={privilege?.isDev ? "开发模式下请打包后测试管理员模式" : "通过 Windows UAC 以管理员权限重启 Novayxk"}
-              >
-                <ShieldCheck size={16} />
-                {isRestartingAsAdmin ? "等待确认" : privilege?.isAdmin ? "已进入管理员模式" : "切换到管理员模式"}
-              </button>
-            </div>
+
+              <div className={`privilege-panel ${privilege?.isAdmin ? "admin" : ""}`}>
+                <div>
+                  <span>{locale.system.privilegeTitle}</span>
+                  <strong>{privilege?.isAdmin ? locale.system.privilegeAdmin : locale.system.privilegeStandard}</strong>
+                  <p>
+                    {privilege?.isAdmin
+                      ? locale.system.privilegeAdminDescription
+                      : locale.system.privilegeStandardDescription}
+                  </p>
+                </div>
+                <button
+                  className="ghost-button"
+                  onClick={onRestartAsAdmin}
+                  disabled={Boolean(privilege?.isAdmin) || !privilege?.canElevate || isRestartingAsAdmin}
+                  title={privilege?.isDev ? locale.system.privilegeDevTitle : locale.system.privilegeRestartTitle}
+                >
+                  <ShieldCheck size={16} />
+                  {isRestartingAsAdmin
+                    ? locale.system.waitingForConfirmation
+                    : privilege?.isAdmin
+                      ? locale.system.alreadyAdminMode
+                      : locale.system.switchToAdminMode}
+                </button>
+              </div>
+            </>
           ) : null}
         </div>
 
         <div className="modal-actions">
           <button className="ghost-button" onClick={onClose}>
-            取消
+            {locale.cancel}
           </button>
           <button className="primary-button" onClick={onSave}>
             <Save size={17} />
-            保存配置
+            {locale.save}
           </button>
         </div>
       </section>

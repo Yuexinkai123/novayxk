@@ -129,7 +129,7 @@ contextBridge.exposeInMainWorld("novayxk", {
       };
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error("浏览器工作区命令等待超时"));
+        reject(new Error("Timed out while waiting for the browser workspace command."));
       }, BROWSER_WORKSPACE_COMMAND_TIMEOUT_MS);
       const onReply = (_event, incomingRequestId, payload) => {
         if (incomingRequestId !== requestId) return;
@@ -138,7 +138,7 @@ contextBridge.exposeInMainWorld("novayxk", {
           resolve(payload.result);
           return;
         }
-        reject(new Error(payload?.error || "浏览器工作区命令执行失败"));
+        reject(new Error(payload?.error || "Browser workspace command failed."));
       };
       ipcRenderer.on("browser:workspaceCommand:reply", onReply);
       ipcRenderer.send("browser:workspaceCommand", requestId, request);

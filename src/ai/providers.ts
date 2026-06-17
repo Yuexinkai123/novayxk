@@ -44,13 +44,13 @@ export function inferProviderApiMode(model: string): NonNullable<ProviderConfig[
 
 export function getProviderModeLabel(apiMode: ProviderConfig["apiMode"]) {
   if (apiMode === "responses") return "Responses";
-  if (apiMode === "imageGenerations") return "图片生成";
-  return "聊天";
+  if (apiMode === "imageGenerations") return "Image generation";
+  return "Chat";
 }
 
 export function formatElapsedSeconds(elapsedMs: number) {
   const seconds = Math.max(0, elapsedMs) / 1000;
-  return `${seconds < 10 ? seconds.toFixed(1) : seconds.toFixed(0)} 秒`;
+  return `${seconds < 10 ? seconds.toFixed(1) : seconds.toFixed(0)} s`;
 }
 
 export function hasUsableProvider(provider: ProviderConfig | null | undefined) {

@@ -6,7 +6,7 @@ let activeProjectRoot = null;
 let PROJECTS_DIR = "";
 
 function getProjectId(projectRoot = activeProjectRoot) {
-  if (!projectRoot) throw new Error("请先打开一个项目。");
+  if (!projectRoot) throw new Error("Please open a project first.");
   return crypto.createHash("sha256").update(path.resolve(projectRoot).toLowerCase()).digest("hex").slice(0, 16);
 }
 
@@ -24,7 +24,7 @@ function getProjectMemoryPaths(projectRoot = activeProjectRoot) {
 
 function assertTaskId(taskId) {
   if (!taskId || typeof taskId !== "string" || !/^[a-zA-Z0-9_-]{8,64}$/.test(taskId)) {
-    throw new Error("任务 ID 无效。");
+    throw new Error("Invalid task ID.");
   }
   return taskId;
 }
@@ -35,10 +35,10 @@ function createTaskId() {
 
 function titleFromMessages(messages) {
   const firstUserMessage = Array.isArray(messages) ? messages.find((message) => message?.role === "user") : null;
-  const raw = firstUserMessage?.content ?? "新任务";
+  const raw = firstUserMessage?.content ?? "New task";
   return stripInjectedContext(raw).replace(/\s+/g, " ")
     .trim()
-    .slice(0, 36) || "新任务";
+    .slice(0, 36) || "New task";
 }
 
 function summarizeMessages(messages) {
@@ -49,12 +49,19 @@ function summarizeMessages(messages) {
     .map((message) => stripInjectedContext(message.content).trim())
     .filter(Boolean);
   if (!userMessages.length) return "";
-  return `最近任务重点：${userMessages.join("；").slice(0, 1200)}`;
+  return `Recent task focus: ${userMessages.join("; ").slice(0, 1200)}`;
 }
 
 function stripInjectedContext(content) {
   const text = String(content ?? "");
-  const indexes = ["\n\n当前选中文件：", "\n\n项目上下文摘要：", "\n\n运行上下文："]
+  const indexes = [
+    "\n\n当前选中文件：",
+    "\n\n项目上下文摘要：",
+    "\n\n运行上下文：",
+    "\n\nCurrent selected file:",
+    "\n\nProject context summary:",
+    "\n\nRuntime context:",
+  ]
     .map((marker) => text.indexOf(marker))
     .filter((index) => index > -1);
   return indexes.length ? text.slice(0, Math.min(...indexes)) : text;
@@ -133,7 +140,7 @@ async function readProjectMemoryState(projectRoot = activeProjectRoot) {
       const task = JSON.parse(raw);
       tasks.push({
         id: task.id,
-        title: task.title || "未命名任务",
+        title: task.title || "Untitled task",
         summary: task.summary || "",
         messageCount: Array.isArray(task.messages) ? task.messages.length : 0,
         createdAt: task.createdAt || "",
@@ -154,15 +161,15 @@ async function readProjectMemoryState(projectRoot = activeProjectRoot) {
 }
 
 async function writeProjectMemory(memory) {
-  if (typeof memory !== "string") throw new Error("项目记忆必须是文本。");
-  if (memory.length > 80_000) throw new Error("项目记忆太长，请精简后再保存。");
+  if (typeof memory !== "string") throw new Error("Project memory must be plain text.");
+  if (memory.length > 80_000) throw new Error("Project memory is too long. Please shorten it before saving.");
   const paths = await ensureProjectMemoryRoot();
   await fs.writeFile(paths.memoryFile, memory, "utf8");
   return readProjectMemoryState();
 }
 
 async function saveTaskHistory(taskInput) {
-  if (!taskInput || typeof taskInput !== "object") throw new Error("任务数据无效。");
+  if (!taskInput || typeof taskInput !== "object") throw new Error("Invalid task data.");
   const paths = await ensureProjectMemoryRoot();
   const now = new Date().toISOString();
   const id = taskInput.id ? assertTaskId(taskInput.id) : createTaskId();
@@ -176,7 +183,7 @@ async function saveTaskHistory(taskInput) {
   }
 
   const messages = Array.isArray(taskInput.messages) ? taskInput.messages : existing.messages ?? [];
-  if (messages.length > 300) throw new Error("任务消息太多，请新建一个任务继续。");
+  if (messages.length > 300) throw new Error("This task has too many messages. Please start a new task to continue.");
   const normalizedMessages = messages.map((message) => {
     const attachments = normalizeMessageAttachments(message.attachments);
     const tokenUsage = normalizeTokenUsage(message.tokenUsage);

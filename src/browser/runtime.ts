@@ -109,7 +109,7 @@ function waitForNavigationSettled(view: BrowserRuntimeView, timeoutMs: number, f
 
     const onDidFailLoad = (event: Event) => {
       const detail = (event as CustomEvent).detail as { errorDescription?: string } | undefined;
-      fail(detail?.errorDescription || "页面加载失败");
+      fail(detail?.errorDescription || "Page failed to load");
     };
 
     view.addEventListener("did-stop-loading", onDidStopLoading);
@@ -133,7 +133,7 @@ export function createBrowserAutomationRunner({
       const unavailableResult: BrowserAutomationResult = {
         ok: false,
         action: action.type,
-        preview: "浏览器视图尚未就绪，请先打开浏览器工作区。",
+        preview: "The browser view is not ready yet. Open the browser workspace first.",
       };
       onAutomationResult?.(unavailableResult);
       return unavailableResult;
@@ -159,13 +159,13 @@ export function createBrowserAutomationRunner({
         const result: BrowserAutomationResult = {
           ok: true,
           action: "navigate",
-          preview: `${snapshot.title || "页面已打开"} · ${snapshot.currentUrl}`.slice(0, 180),
+          preview: `${snapshot.title || "Page opened"} · ${snapshot.currentUrl}`.slice(0, 180),
         };
         onAutomationResult?.(result);
         return result;
       } catch (error) {
-        const preview = error instanceof Error ? error.message.slice(0, 180) : "页面打开失败";
-        emitActionObserved?.(createActionLogRecord("navigate", currentUrl, `${label}失败`, preview));
+        const preview = error instanceof Error ? error.message.slice(0, 180) : "Failed to open page";
+        emitActionObserved?.(createActionLogRecord("navigate", currentUrl, `${label} failed`, preview));
         const result: BrowserAutomationResult = {
           ok: false,
           action: "navigate",
@@ -191,8 +191,8 @@ export function createBrowserAutomationRunner({
       onAutomationResult?.(result);
       return result;
     } catch (error) {
-      const preview = error instanceof Error ? error.message.slice(0, 180) : `${label}失败`;
-      emitActionObserved?.(createActionLogRecord("change", currentUrl, `${label}失败`, preview));
+      const preview = error instanceof Error ? error.message.slice(0, 180) : `${label} failed`;
+      emitActionObserved?.(createActionLogRecord("change", currentUrl, `${label} failed`, preview));
       const result: BrowserAutomationResult = {
         ok: false,
         action: action.type,

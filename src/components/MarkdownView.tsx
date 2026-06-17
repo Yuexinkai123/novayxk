@@ -15,7 +15,7 @@ export function MarkdownView({ content }: { content: string }) {
                 key={`code-${index}`}
                 language={block.language}
                 content={block.content}
-                forceLabel="执行结果"
+                forceLabel="Execution Output"
               />
             );
           }
@@ -167,12 +167,12 @@ function isCollapsibleOutputBlock(language: string, markdownContent: string, blo
     .split(/```(?:[A-Za-z][\w-]*)?\s*[\s\S]*?```/g)
     .slice(0, blockIndex + 1)
     .join("\n");
-  return /PowerShell 执行结果|执行结果|终端输出/i.test(previousContent);
+  return /PowerShell execution output|execution output|terminal output|PowerShell 执行结果|执行结果|终端输出/i.test(previousContent);
 }
 
 function getCodePreview(content: string) {
   const firstLine = content.split("\n").find((line) => line.trim()) ?? "";
-  return firstLine.length > 88 ? `${firstLine.slice(0, 88)}...` : firstLine || "(空命令)";
+  return firstLine.length > 88 ? `${firstLine.slice(0, 88)}...` : firstLine || "(empty command)";
 }
 
 function getCodeLanguageLabel(language: string, forceLabel?: string) {
@@ -181,8 +181,8 @@ function getCodeLanguageLabel(language: string, forceLabel?: string) {
   if (/^(?:cmd|bat)$/i.test(language)) return "CMD";
   if (/^(?:bash|shell|shell-run)$/i.test(language)) return "Shell";
   if (/^browser-actions$/i.test(language)) return "Browser Actions";
-  if (/^(?:text|plaintext)?$/i.test(language)) return "文本";
-  return language || "命令";
+  if (/^(?:text|plaintext)?$/i.test(language)) return "Text";
+  return language || "Command";
 }
 
 function CollapsibleCodeBlock({
@@ -204,11 +204,11 @@ function CollapsibleCodeBlock({
         type="button"
         className="markdown-code-toggle"
         onClick={() => setExpanded((value) => !value)}
-        title={expanded ? "收起命令" : "展开命令"}
+        title={expanded ? "Collapse command" : "Expand command"}
       >
         <span className="markdown-code-toggle-label">{label}</span>
         <span className="markdown-code-toggle-preview">{preview}</span>
-        <span className="markdown-code-toggle-icon">{expanded ? "收起" : "展开"}</span>
+        <span className="markdown-code-toggle-icon">{expanded ? "Collapse" : "Expand"}</span>
       </button>
       {expanded ? (
         <pre className="markdown-code">

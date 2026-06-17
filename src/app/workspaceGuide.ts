@@ -1,7 +1,7 @@
 export type WorkspaceGuideKind = "configure-model" | "open-project" | "start-working" | null;
 
 export function getGuidePromptStatus() {
-  return "已填入示例提示词，并展开助手栏。现在可以直接回车发送。";
+  return "A starter prompt has been inserted and the assistant panel is open. You can press Enter to send it now.";
 }
 
 export function getWorkspaceGuideKind(options: {

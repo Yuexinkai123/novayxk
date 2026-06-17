@@ -181,7 +181,7 @@ export function useAiAssistant({
     const message = error instanceof Error ? error.message : String(error || "");
     if (!message || message === STREAM_ABORT_MESSAGE) return false;
     if (
-      /供应商配置不完整|图片提示词不能为空|当前在浏览器预览模式|没有检测到 Novayxk 桌面桥接|Base URL 无效|当前供应商配置为图片生成接口|当前系统权限不够|请先打开一个项目|图片生成接口返回成功，但没有图片数据|模型列表接口返回成功，但没有可用模型/i.test(
+      /供应商配置不完整|图片提示词不能为空|当前在浏览器预览模式|没有检测到 Novayxk 桌面桥接|Base URL 无效|当前供应商配置为图片生成接口|当前系统权限不够|请先打开一个项目|图片生成接口返回成功，但没有图片数据|模型列表接口返回成功，但没有可用模型|provider configuration is incomplete|image prompt cannot be empty|browser preview mode|desktop bridge was not detected|base url is invalid|current provider configuration is for image generation|current system privileges are insufficient|open a project first|image generation endpoint returned success, but no image data|model list request returned success, but no available models/i.test(
         message,
       )
     ) {
@@ -196,7 +196,7 @@ export function useAiAssistant({
   }
 
   async function waitBeforeModelRetry(retryIndex: number, actionLabel: string) {
-    setStatus(`${actionLabel}失败，正在重试 ${retryIndex}/${MODEL_REQUEST_MAX_RETRIES}...`);
+    setStatus(`${actionLabel} failed. Retrying ${retryIndex}/${MODEL_REQUEST_MAX_RETRIES}...`);
     await new Promise((resolve) => window.setTimeout(resolve, Math.min(1200 * retryIndex, 4000)));
   }
 
@@ -213,7 +213,7 @@ export function useAiAssistant({
         await waitBeforeModelRetry(attempt, actionLabel);
       }
     }
-    throw lastError instanceof Error ? lastError : new Error(`${actionLabel}失败`);
+    throw lastError instanceof Error ? lastError : new Error(`${actionLabel} failed`);
   }
 
   function getVerificationDepth(mode: AssistantMode): VerificationDepth {
@@ -233,7 +233,7 @@ export function useAiAssistant({
   }
 
   function truncateForVerification(value: string, limit = DEEP_VERIFICATION_CONTEXT_LIMIT) {
-    return value.length > limit ? `${value.slice(0, limit)}\n...（已截断）` : value;
+    return value.length > limit ? `${value.slice(0, limit)}\n... (truncated)` : value;
   }
 
   function normalizeProjectRelativePath(relativePath: string) {
@@ -265,20 +265,20 @@ export function useAiAssistant({
         role: "system",
         content: `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
 
-【深度复查规则】
-你正在做一次执行后复查。只能基于已经发生的真实结果判断，不要脑补成功。
-- 只用 1 到 2 句中文。
-- 先写“深度复查：已确认 / 基本确认 / 未确认”三选一。
-- 再补最关键的依据或仍需人工确认的点。
-- 不要输出 powershell-run、fileops、browser-actions、diff 或 JSON。`,
+[Deep verification rules]
+You are performing a post-execution verification pass. Judge only from real results that already happened; do not imagine success.
+- Use only 1 to 2 short sentences.
+- Start with one of: "Deep verification: confirmed", "Deep verification: mostly confirmed", or "Deep verification: not confirmed".
+- Then add the single most important piece of evidence, or the main point that still needs manual confirmation.
+- Do not output powershell-run, fileops, browser-actions, diff, or JSON.`,
       },
       {
         role: "user",
-        content: `原始用户目标：${userGoal || "未提供"}\n\n复查对象：${label}\n\n真实证据：\n${truncateForVerification(evidence)}`,
+        content: `Original user goal: ${userGoal || "Not provided"}\n\nVerification target: ${label}\n\nReal evidence:\n${truncateForVerification(evidence)}`,
       },
     ];
 
-    const rawReply = await runModelRequestWithRetries("深度复查请求", () =>
+    const rawReply = await runModelRequestWithRetries("Deep verification request", () =>
       bridge.chat({
         provider: activeProvider,
         messages: promptMessages,
@@ -330,21 +330,21 @@ export function useAiAssistant({
           if (file.content === operation.content) {
             confirmedWrites += 1;
           } else {
-            failedChecks.push(`${operation.path}：回读内容与写入内容不一致`);
+            failedChecks.push(`${operation.path}: the read-back content does not match the written content`);
           }
         } else if (!file.content.includes(operation.replace)) {
-          failedChecks.push(`${operation.path}：回读后未找到替换文本`);
+          failedChecks.push(`${operation.path}: the replacement text was not found after reading the file back`);
         } else if (operation.occurrence === "all" && file.content.includes(operation.search)) {
-          failedChecks.push(`${operation.path}：仍然存在未替换完的原文本`);
+          failedChecks.push(`${operation.path}: some original text that should have been replaced is still present`);
         } else {
           confirmedWrites += 1;
         }
 
         if (depth === "deep") {
-          evidenceBlocks.push(`文件 ${operation.path}：\n${truncateForVerification(file.content.slice(0, 1400), 1400)}`);
+          evidenceBlocks.push(`File ${operation.path}:\n${truncateForVerification(file.content.slice(0, 1400), 1400)}`);
         }
       } catch (error) {
-        failedChecks.push(`${operation.path}：${error instanceof Error ? error.message : "回读失败"}`);
+        failedChecks.push(`${operation.path}: ${error instanceof Error ? error.message : "read-back failed"}`);
       }
     }
 
@@ -352,31 +352,31 @@ export function useAiAssistant({
       if (await doesProjectPathExist(operation.path)) {
         confirmedDirs += 1;
       } else {
-        failedChecks.push(`${operation.path}：目录未出现在项目树中`);
+        failedChecks.push(`${operation.path}: the directory did not appear in the project tree`);
       }
     }
 
     const writeLikeChecked = Math.min(writeLikeOperations.length, writeLikeLimit);
     const mkdirChecked = Math.min(mkdirOperations.length, mkdirLimit);
     const confirmedSegments = [
-      writeLikeChecked ? `${confirmedWrites}/${writeLikeChecked} 个关键文件回写成功` : "",
-      mkdirChecked ? `${confirmedDirs}/${mkdirChecked} 个目录已创建` : "",
+      writeLikeChecked ? `${confirmedWrites}/${writeLikeChecked} key file write-backs confirmed` : "",
+      mkdirChecked ? `${confirmedDirs}/${mkdirChecked} directories confirmed created` : "",
     ].filter(Boolean);
     const baseNote =
       failedChecks.length > 0
-        ? `已复查：${confirmedSegments.length ? `已确认 ${confirmedSegments.join("，")}` : "自动执行已返回成功"}；仍有未确认项：${failedChecks.join("；")}。`
-        : `已复查：${confirmedSegments.length ? `已确认 ${confirmedSegments.join("，")}` : "自动执行已返回成功"}。`;
+        ? `Verified: ${confirmedSegments.length ? `confirmed ${confirmedSegments.join(", ")}` : "automatic execution already returned success"}; unresolved checks remain: ${failedChecks.join("; ")}.`
+        : `Verified: ${confirmedSegments.length ? `confirmed ${confirmedSegments.join(", ")}` : "automatic execution already returned success"}.`;
 
     if (depth !== "deep") {
       return { note: baseNote };
     }
 
     const deepVerification = await requestDeepVerification(
-      "文件操作结果",
+      "File operation result",
       baseMessages,
       [
-        `本地复查：${baseNote}`,
-        changedFiles.length ? `变更文件：${changedFiles.join(", ")}` : "",
+        `Local verification: ${baseNote}`,
+        changedFiles.length ? `Changed files: ${changedFiles.join(", ")}` : "",
         ...evidenceBlocks,
       ]
         .filter(Boolean)
@@ -395,15 +395,15 @@ export function useAiAssistant({
     const emptySucceeded = commandResults.filter((result) => result.code === 0 && !result.output.trim());
 
     if (running.length) {
-      return `已复查：仍有 ${running.length} 个命令在终端里持续运行，当前还不能断言任务已经完成。`;
+      return `Verified: ${running.length} command(s) are still running in the terminal, so the task cannot be considered complete yet.`;
     }
     if (failed.length) {
-      return `已复查：有 ${failed.length} 个命令退出码非 0，这次结果还不能算完全完成。`;
+      return `Verified: ${failed.length} command(s) exited with a non-zero code, so this result is not fully complete yet.`;
     }
     if (emptySucceeded.length) {
-      return `已复查：所有命令退出码都正常，但有 ${emptySucceeded.length} 个步骤没有可见输出，只能确认命令执行了，不能完全确认目标状态。`;
+      return `Verified: all commands exited normally, but ${emptySucceeded.length} step(s) produced no visible output, so only command execution is confirmed, not the full target state.`;
     }
-    return "已复查：所有自动执行命令都有可见输出且退出码正常。";
+    return "Verified: all automatically executed commands produced visible output and exited normally.";
   }
 
   async function buildCommandVerificationSummary(
@@ -418,9 +418,9 @@ export function useAiAssistant({
     }
 
     const deepVerification = await requestDeepVerification(
-      "PowerShell 执行结果",
+      "PowerShell execution result",
       baseMessages,
-      `本地复查：${baseNote}\n\n模型总结：\n${summaryContent}\n\n命令真实输出：\n${executionContent}`,
+      `Local verification: ${baseNote}\n\nModel summary:\n${summaryContent}\n\nReal command output:\n${executionContent}`,
     ).catch(() => ({ note: "" } as VerificationSummary));
 
     return {
@@ -438,10 +438,10 @@ export function useAiAssistant({
     if (!bridge) return { note: "" };
 
     const snapshot = await bridge.getBrowserSnapshot().catch(() => null);
-    const locationNote = snapshot ? `${snapshot.title || "当前页面"} · ${snapshot.currentUrl}` : "当前页面信息暂时不可用";
+    const locationNote = snapshot ? `${snapshot.title || "Current page"} · ${snapshot.currentUrl}` : "Current page information is temporarily unavailable";
     const baseNote = followUpNote
-      ? `已复查：浏览器当前停留在 ${locationNote}。另外，自动流程在本轮停下的原因是：${followUpNote}`
-      : `已复查：浏览器当前停留在 ${locationNote}。本轮自动动作没有检测到失败。`;
+      ? `Verified: the browser is currently on ${locationNote}. The automatic flow stopped in this round because: ${followUpNote}`
+      : `Verified: the browser is currently on ${locationNote}. No failures were detected in this round of automatic actions.`;
 
     if (getVerificationDepth(assistantMode) !== "deep") {
       return { note: baseNote };
@@ -449,7 +449,7 @@ export function useAiAssistant({
 
     const browserContext = await getBrowserPromptContext().catch(() => "");
     const deepVerification = await requestDeepVerification(
-      "浏览器自动操作结果",
+      "Browser automation result",
       baseMessages,
       [baseNote, ...roundBlocks, browserContext].filter(Boolean).join("\n\n"),
     ).catch(() => ({ note: "" } as VerificationSummary));
@@ -462,9 +462,9 @@ export function useAiAssistant({
 
   function buildImageVerificationSummary(imageCount: number): VerificationSummary {
     if (imageCount <= 0) {
-      return { note: "已复查：接口没有返回任何图片文件，所以这次结果不能算完成。" };
+      return { note: "Verified: the endpoint returned no image files, so this result cannot be considered complete." };
     }
-    return { note: `已复查：本次已收到 ${imageCount} 张图片文件，并已保存在本地生成目录。` };
+    return { note: `Verified: ${imageCount} image file(s) were received and saved in the local generated-images directory.` };
   }
 
   async function handleInternalControlModeRequest(userPrompt: string, nextMessages: ChatMessage[]) {
@@ -476,8 +476,8 @@ export function useAiAssistant({
     const saved = aiControlMode === nextMode ? true : await updateAiControlMode(nextMode);
     const assistantContent =
       nextMode === "full"
-        ? "已切换到 Novayxk 的系统级执行范围。这个只决定 AI 可以请求执行哪些命令，不等于当前已经拥有 Windows 管理员权限；如果后面遇到系统级命令，我还会单独请求 UAC/管理员授权。"
-        : "已切换回 Novayxk 的项目内执行范围。之后我会优先执行项目目录内的开发命令，系统级动作会继续拦截或要求确认。";
+        ? "Switched Novayxk to system-level execution scope. This only changes which commands the AI may request; it does not mean the app already has Windows administrator privileges. If a later step needs system-level access, I will still request UAC or administrator approval separately."
+        : "Switched Novayxk back to project-level execution scope. I will prioritize development commands inside the current project, and system-level actions will still be blocked or require confirmation.";
     const handledMessages: ChatMessage[] = [
       ...nextMessages,
       {
@@ -486,7 +486,7 @@ export function useAiAssistant({
       },
     ];
     setMessages(handledMessages);
-    setStatus(saved ? getExecutionModeStatus(nextMode) : "执行范围已切换，但保存偏好失败");
+    setStatus(saved ? getExecutionModeStatus(nextMode) : "Execution scope was switched, but the preference could not be saved");
     await saveCurrentTask(handledMessages);
     return true;
   }
@@ -500,10 +500,10 @@ export function useAiAssistant({
     const saved = assistantMode === nextMode ? true : await updateAssistantMode(nextMode);
     const assistantContent =
       nextMode === "low"
-        ? "已切换到极省模式。之后我会尽量少带上下文、少解释，只保留必要动作和结论；执行后默认只做最低成本复查。"
+        ? "Switched to Ultra-light mode. I will keep context and explanation to a minimum, preserve only the necessary actions and conclusions, and do only the lowest-cost verification by default."
         : nextMode === "deep"
-          ? "已切换到深度模式。之后我会保留更多上下文，更适合复杂排查、重构和多步骤任务；执行后会补完整复查链路。"
-          : "已切换到标准模式。之后我会在上下文、速度和完整度之间保持平衡；执行后会补关键结果复查。";
+          ? "Switched to Deep mode. I will keep more context, which is better for complex debugging, refactors, and multi-step tasks, and I will add the full verification chain after execution."
+          : "Switched to Standard mode. I will balance context, speed, and completeness, and verify the key results after execution.";
     const handledMessages: ChatMessage[] = [
       ...nextMessages,
       {
@@ -512,7 +512,7 @@ export function useAiAssistant({
       },
     ];
     setMessages(handledMessages);
-    setStatus(saved ? getAssistantModeStatus(nextMode) : "助手模式已切换，但保存偏好失败");
+    setStatus(saved ? getAssistantModeStatus(nextMode) : "Assistant mode was switched, but the preference could not be saved");
     await saveCurrentTask(handledMessages);
     return true;
   }
@@ -525,17 +525,17 @@ export function useAiAssistant({
 
     let assistantContent = "";
     if (!window.novayxk) {
-      assistantContent = "没有检测到 Novayxk 桌面桥接，当前不能请求 Windows 管理员权限。请关闭当前窗口后重新打开 Novayxk，再切换管理员模式。";
-      setStatus("没有检测到 Novayxk 桌面桥接，请重新打开 Novayxk 后再切换管理员模式。");
+      assistantContent = "The Novayxk desktop bridge is not available, so I cannot request Windows administrator privileges right now. Close this window, reopen Novayxk, and then switch to Administrator Mode again.";
+      setStatus("Desktop bridge not detected. Reopen Novayxk before switching to Administrator Mode.");
     } else if (privilege?.isAdmin) {
-      assistantContent = "当前已经在管理员模式下，不需要再次切换。";
-      setStatus("当前已经在管理员模式下。");
+      assistantContent = "Novayxk is already running in Administrator Mode, so there is no need to switch again.";
+      setStatus("Already running in Administrator Mode.");
     } else if (!privilege?.canElevate) {
-      assistantContent = "当前环境不能直接请求 Windows UAC 管理员权限。请确认你现在运行的是桌面应用，而不是网页预览或开发调试壳。";
-      setStatus("当前环境不能直接切到管理员模式。");
+      assistantContent = "This environment cannot request Windows UAC administrator privileges directly. Make sure you are running the desktop app, not a browser preview or a development shell.";
+      setStatus("This environment cannot switch directly to Administrator Mode.");
     } else {
-      assistantContent = "我正在请求切换到管理员模式。接下来会弹出 Windows UAC 授权窗口；确认后 Novayxk 会以管理员权限重启。";
-      setStatus("正在请求 Windows 管理员权限...");
+      assistantContent = "I am requesting Administrator Mode now. A Windows UAC approval window will appear next; once you confirm it, Novayxk will restart with administrator privileges.";
+      setStatus("Requesting Windows administrator privileges...");
       const pendingMessages: ChatMessage[] = [
         ...nextMessages,
         {
@@ -547,7 +547,7 @@ export function useAiAssistant({
       await saveCurrentTask(pendingMessages);
       const started = await restartAsAdmin();
       if (started) return true;
-      assistantContent = "管理员模式没有成功启动。可能是当前处于开发模式，或 Windows UAC 授权被取消。";
+      assistantContent = "Administrator Mode did not start successfully. The app may be running in development mode, or the Windows UAC prompt may have been cancelled.";
     }
 
     const handledMessages: ChatMessage[] = [
@@ -578,14 +578,14 @@ export function useAiAssistant({
     setMessages(nextMessages);
 
     const assistantContent = !window.novayxk
-      ? "当前是浏览器预览环境，这里不能真正打开 Electron 的内嵌浏览器窗口。请用桌面版 Novayxk 打开。"
-      : "已为你打开内嵌浏览器工作区。";
+      ? "This is a browser preview environment, so it cannot open the real embedded Electron browser window. Please use the desktop version of Novayxk."
+      : "The embedded browser workspace is now open.";
 
     if (window.novayxk) {
       openBrowserWorkspace();
-      setStatus("已打开浏览器工作区窗口");
+      setStatus("Opened the browser workspace window");
     } else {
-      setStatus("当前环境不支持打开内嵌浏览器窗口");
+      setStatus("This environment does not support opening the embedded browser window");
     }
 
     const handledMessages: ChatMessage[] = [
@@ -630,7 +630,7 @@ export function useAiAssistant({
       });
       return formatProjectContext(context, assistantMode);
     } catch (error) {
-      setStatus(formatActionableError(error, "读取项目上下文失败"));
+      setStatus(formatActionableError(error, "Failed to read project context"));
       return "";
     }
   }
@@ -647,7 +647,7 @@ export function useAiAssistant({
     try {
       return await getBrowserPromptContext();
     } catch (error) {
-      setStatus(formatActionableError(error, "读取浏览器上下文失败"));
+      setStatus(formatActionableError(error, "Failed to read browser context"));
       return "";
     }
   }
@@ -692,11 +692,11 @@ export function useAiAssistant({
         ...nextMessages,
         {
           role: "assistant",
-          content: "还没有打开项目，所以现在没有地方可保存这张图片。",
+          content: "No project is currently open, so there is nowhere to save this image yet.",
         },
       ];
       setMessages(blockedMessages);
-      setStatus("请先打开一个项目。");
+      setStatus("Open a project first.");
       await saveCurrentTask(blockedMessages);
       return true;
     }
@@ -706,11 +706,11 @@ export function useAiAssistant({
         ...nextMessages,
         {
           role: "assistant",
-          content: "当前在浏览器预览模式，保存对话图片到项目目录需要用 Electron 启动。",
+          content: "You are in browser preview mode. Saving a chat image into the project directory requires the Electron desktop app.",
         },
       ];
       setMessages(blockedMessages);
-      setStatus("当前环境不支持保存对话图片到项目目录。");
+      setStatus("This environment cannot save chat images into the project directory.");
       await saveCurrentTask(blockedMessages);
       return true;
     }
@@ -721,17 +721,17 @@ export function useAiAssistant({
         ...nextMessages,
         {
           role: "assistant",
-          content: "最近对话里没有可保存的图片。",
+          content: "There is no recent generated image in this conversation to save.",
         },
       ];
       setMessages(blockedMessages);
-      setStatus("没有找到可保存的对话图片。");
+      setStatus("No savable chat image was found.");
       await saveCurrentTask(blockedMessages);
       return true;
     }
 
     const targetPath = extractGeneratedImageTargetPath(userPrompt);
-    setStatus(targetPath ? `正在保存图片到 ${targetPath}...` : "正在保存图片到当前项目目录...");
+    setStatus(targetPath ? `Saving image to ${targetPath}...` : "Saving image to the current project directory...");
     try {
       const result = await window.novayxk.saveGeneratedImageToProject({
         imagePath: latestImage.path,
@@ -741,15 +741,15 @@ export function useAiAssistant({
         ...nextMessages,
         {
           role: "assistant",
-          content: `已将刚才生成的图片保存到当前项目目录：${result.relativePath}`,
+          content: `Saved the recently generated image to the current project directory: ${result.relativePath}`,
         },
       ];
       await syncProjectView({ preferredPath: result.relativePath });
       setMessages(completedMessages);
-      setStatus(`图片已保存：${result.relativePath}`);
+      setStatus(`Image saved: ${result.relativePath}`);
       await saveCurrentTask(completedMessages);
     } catch (error) {
-      const content = formatActionableError(error, "保存对话图片失败");
+      const content = formatActionableError(error, "Failed to save the chat image");
       const failedMessages: ChatMessage[] = [
         ...nextMessages,
         {
@@ -773,11 +773,11 @@ export function useAiAssistant({
         ...baseMessages,
         {
           role: "assistant",
-          content: `检测到 fileops 文件操作代码块不完整或 JSON 解析失败，可能是模型一次性生成的内容太长被截断了。\n\n原因：${parseIssue}\n\n建议把大型前端页面拆成多个文件分批生成，例如 package.json、src/main.js、src/App.vue、src/styles.css，而不是把完整系统塞进一个超大的 HTML 字符串。`,
+          content: `An incomplete \`fileops\` block or a JSON parsing failure was detected. The model output was likely truncated because too much content was generated at once.\n\nReason: ${parseIssue}\n\nIt is better to split large frontend work across multiple files, such as package.json, src/main.js, src/App.vue, and src/styles.css, instead of trying to generate an entire system inside one huge HTML string.`,
         },
       ];
       setMessages(nextMessages);
-      setStatus("fileops 不完整，可能被模型输出长度截断");
+      setStatus("The fileops block is incomplete and may have been truncated by the model output length");
       return nextMessages;
     }
 
@@ -799,9 +799,9 @@ export function useAiAssistant({
       .find(({ inspection }) => inspection.blocked);
     if (sensitiveMutation) {
       const warning =
-        `检测到文件修改包含敏感内容，Novayxk 已暂停自动执行，但保留了这次 fileops。你确认这是自己要写入的内容后，可以点底部工具栏的“执行文件操作”手动执行。\n\n` +
-        `原因：${sensitiveMutation.inspection.reason}\n\n` +
-        `提示：如果不想每次确认，可以让 AI 改成环境变量、命令行参数、交互输入或占位符。`;
+        `Detected sensitive content in the file change. Novayxk paused automatic execution, but kept this fileops payload. After you confirm that this is content you really want to write, you can click "Run file operations" in the bottom toolbar to execute it manually.\n\n` +
+        `Reason: ${sensitiveMutation.inspection.reason}\n\n` +
+        `Tip: If you do not want to confirm every time, ask the AI to switch to environment variables, command-line arguments, interactive input, or placeholders.`;
       const lastMessage = baseMessages[baseMessages.length - 1];
       const blockedMessages: ChatMessage[] = [
         ...baseMessages.slice(0, -1),
@@ -810,13 +810,13 @@ export function useAiAssistant({
           : { role: "assistant", content: warning },
       ];
       setMessages(blockedMessages);
-      setStatus("敏感文件操作已暂停，等待你手动确认");
+      setStatus("Sensitive file operations were paused and are waiting for your confirmation");
       return blockedMessages;
     }
 
     if (hasDestructiveFileOps(operations)) {
       const warning =
-        "检测到 delete 文件操作。为了避免 AI 自动误删项目内容，这类 fileops 不会自动执行；请先检查路径，再点底部工具栏的“执行文件操作”按钮手动确认。";
+        'Detected a delete file operation. To avoid accidental AI-driven deletion of project content, this kind of fileops payload will not run automatically. Check the path first, then click "Run file operations" in the bottom toolbar to confirm it manually.';
       const lastMessage = baseMessages[baseMessages.length - 1];
       const nextMessages: ChatMessage[] =
         lastMessage?.role === "assistant"
@@ -829,7 +829,7 @@ export function useAiAssistant({
             ]
           : [...baseMessages, { role: "assistant", content: warning }];
       setMessages(nextMessages);
-      setStatus("检测到删除类 fileops，已改为等待人工确认");
+      setStatus("Delete fileops detected and switched to manual confirmation");
       return nextMessages;
     }
 
@@ -839,7 +839,7 @@ export function useAiAssistant({
         {
           role: "assistant",
           content:
-            "检测到文件操作，但当前还没有打开项目，所以这次没有执行。若目标文件在当前项目内，请先打开对应项目；若目标是桌面、下载或其他项目外路径，请让我改用 powershell-run 处理。",
+            "File operations were detected, but no project is currently open, so they were not executed. If the target file belongs to the current project, open that project first. If the target is on the Desktop, in Downloads, or anywhere else outside the project, ask me to switch to powershell-run instead.",
         },
       ];
       setMessages(blockedMessages);
@@ -848,10 +848,10 @@ export function useAiAssistant({
 
     try {
       if (!window.novayxk) {
-        throw new Error("当前在浏览器预览模式，文件操作需要用 Electron 启动。");
+        throw new Error("You are currently in browser preview mode. File operations require the Electron app.");
       }
 
-      setStatus("AI 正在执行文件操作...");
+      setStatus("The AI is running file operations...");
       const result = await window.novayxk.applyFileOps(operations);
       const firstWrittenFile =
         operations.find((operation) => operation.type === "write" || operation.type === "replace")?.path ?? null;
@@ -866,26 +866,26 @@ export function useAiAssistant({
         {
           role: "assistant",
           content: appendVerificationNote(
-            `文件操作已自动执行：\n\n${result.changedFiles.map((file) => `- ${file}`).join("\n")}`,
+            `File operations were executed automatically:\n\n${result.changedFiles.map((file) => `- ${file}`).join("\n")}`,
             verification.note,
           ),
           ...(verification.tokenUsage ? { tokenUsage: verification.tokenUsage } : {}),
         },
       ];
       setMessages(nextMessages);
-      setStatus(`文件操作已自动执行：${result.changedFiles.join(", ")}`);
+      setStatus(`File operations completed automatically: ${result.changedFiles.join(", ")}`);
       return nextMessages;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "AI 文件操作执行失败";
+      const message = error instanceof Error ? error.message : "AI file operations failed";
       const nextMessages: ChatMessage[] = [
         ...baseMessages,
         {
           role: "assistant",
-          content: `文件操作自动执行失败：${message}\n\n我已保留这次文件操作，你可以点底部工具栏的“执行文件操作”按钮手动确认，或者让我改成别的写法。`,
+          content: `Automatic file operations failed: ${message}\n\nI kept this fileops payload for you. You can click "Run file operations" in the bottom toolbar to confirm it manually, or ask me to rewrite it in a different way.`,
         },
       ];
       setMessages(nextMessages);
-      setStatus(formatActionableError(error, "自动执行文件操作失败"));
+      setStatus(formatActionableError(error, "Automatic file operations failed"));
       return null;
     }
   }
@@ -903,14 +903,14 @@ export function useAiAssistant({
         ...baseMessages,
         {
           role: "assistant",
-          content: `Novayxk 已自动停止连续 PowerShell 执行：${loopCheck.reason}\n\n最近反复出现的命令：\n\n\`\`\`powershell\n${commands
+          content: `Novayxk automatically stopped repeated PowerShell execution: ${loopCheck.reason}\n\nRecently repeated commands:\n\n\`\`\`powershell\n${commands
             .map((command) => command.command)
             .join("\n\n")
-            .slice(0, 3000)}\n\`\`\`\n\n我没有继续执行重复步骤。建议换一种安装源、检查前一步错误原因，或让用户确认下一步。`,
+            .slice(0, 3000)}\n\`\`\`\n\nI did not continue the repeated steps. Try a different install source, inspect the failure from the previous step, or ask the user to confirm what should happen next.`,
         },
       ];
       setMessages(stoppedMessages);
-      setStatus("检测到重复 PowerShell 步骤，已自动中断");
+      setStatus("Repeated PowerShell steps were detected and stopped automatically");
       return stoppedMessages;
     }
 
@@ -919,17 +919,17 @@ export function useAiAssistant({
     for (const commandRequest of commands.slice(0, 5)) {
       const commandText = commandRequest.command.trim();
       if (!commandText) continue;
-      setStatus(`AI 正在以${getExecutionModeLabel(aiControlMode)}执行 PowerShell...`);
+      setStatus(`The AI is running PowerShell in ${getExecutionModeLabel(aiControlMode)} mode...`);
 
       try {
         if (isWriteLikePowerShellCommand(commandText)) {
           const sensitiveInspection = inspectSensitiveGeneratedContent(commandText);
           if (sensitiveInspection.blocked) {
-            throw new Error(`已拦截：自动 PowerShell 写入存在敏感风险。原因：${sensitiveInspection.reason}。请改用环境变量/占位符，或由用户手动确认敏感内容。`);
+            throw new Error(`Blocked: automatic PowerShell write contains sensitive risk. Reason: ${sensitiveInspection.reason}. Please switch to environment variables/placeholders, or have the user confirm the sensitive content manually.`);
           }
         }
         if (!window.novayxk) {
-          throw new Error("当前在浏览器预览模式，执行命令需要用 Electron 启动。");
+          throw new Error("You are currently in browser preview mode. Command execution requires the Electron app.");
         }
         const inspection = await window.novayxk.inspectCommand(commandText);
         const needsAdminRestart = inspection.requiresAdmin && !privilege?.isAdmin && privilege?.canElevate;
@@ -942,8 +942,8 @@ export function useAiAssistant({
             await clearPendingAdminResume();
           }
           const adminMessage = adminState === "restarting"
-            ? `需要 Windows 管理员权限：${inspection.adminReason ?? "该命令可能需要 Windows 管理员权限"}。Novayxk 已请求用户授权以 Windows 管理员权限重启，命令尚未执行。`
-            : `需要 Windows 管理员权限：${inspection.adminReason ?? "该命令可能需要 Windows 管理员权限"}。这次管理员模式切换没有完成，命令尚未执行。`;
+            ? `Windows administrator permission is required: ${inspection.adminReason ?? "This command may require Windows administrator privileges."} Novayxk requested permission to restart with Windows administrator privileges, so the command has not been executed yet.`
+            : `Windows administrator permission is required: ${inspection.adminReason ?? "This command may require Windows administrator privileges."} The administrator mode switch did not complete, so the command has not been executed yet.`;
           resultLines.push(`$ ${commandText}\n${adminMessage}`);
           continue;
         }
@@ -951,10 +951,10 @@ export function useAiAssistant({
           await clearPendingAdminResume();
         }
         const confirmedSystemAction = inspection.requiresConfirmation
-          ? await confirmSystemAction(commandText, inspection.systemAction?.label ?? "系统动作", "ai")
+          ? await confirmSystemAction(commandText, inspection.systemAction?.label ?? "system action", "ai")
           : false;
         if (inspection.requiresConfirmation && !confirmedSystemAction) {
-          resultLines.push(`$ ${commandText}\n特殊系统动作已取消：${inspection.systemAction?.label ?? "系统动作"}`);
+          resultLines.push(`$ ${commandText}\nSpecial system action canceled: ${inspection.systemAction?.label ?? "system action"}`);
           commandResults.push({ command: commandText, output: "", code: null });
           continue;
         }
@@ -968,9 +968,9 @@ export function useAiAssistant({
           setActiveTerminalTaskId(result.terminalTask.id);
           showBottomPanel();
         }
-        const sourceNote = commandRequest.source === "inline" ? "来源：普通文本中识别出的疑似命令" : "来源：powershell-run 代码块";
-        const taskNote = result.terminalTask ? `终端任务：${result.terminalTask.id}` : "";
-        const output = `${sourceNote}\n${taskNote ? `${taskNote}\n` : ""}$ ${commandText}\n${result.output}\n${result.longRunning ? "状态：仍在终端任务中运行" : `退出码：${result.code}`}`;
+        const sourceNote = commandRequest.source === "inline" ? "Source: command-like text detected in normal content" : "Source: powershell-run code block";
+        const taskNote = result.terminalTask ? `Terminal task: ${result.terminalTask.id}` : "";
+        const output = `${sourceNote}\n${taskNote ? `${taskNote}\n` : ""}$ ${commandText}\n${result.output}\n${result.longRunning ? "Status: still running as a terminal task" : `Exit code: ${result.code}`}`;
         resultLines.push(output);
         commandResults.push({
           command: commandText,
@@ -978,8 +978,8 @@ export function useAiAssistant({
           code: result.longRunning ? null : result.code,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "AI PowerShell 执行失败";
-        const sourceNote = commandRequest.source === "inline" ? "来源：普通文本中识别出的疑似命令" : "来源：powershell-run 代码块";
+        const message = error instanceof Error ? error.message : "AI PowerShell execution failed";
+        const sourceNote = commandRequest.source === "inline" ? "Source: command-like text detected in normal content" : "Source: powershell-run code block";
         resultLines.push(`${sourceNote}\n$ ${commandText}\n${message}`);
         commandResults.push({ command: commandText, output: message, code: 1 });
       }
@@ -994,8 +994,8 @@ export function useAiAssistant({
 
     if (stopRequestedRef.current) {
       const stoppedContent = resultLines.length
-        ? `已停止本次生成，正在运行的终端任务已请求停止。\n\nPowerShell 执行结果：\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``
-        : "已停止本次生成，正在运行的终端任务已请求停止。";
+        ? `Generation stopped, and any running terminal task was asked to stop.\n\nPowerShell execution output:\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``
+        : "Generation stopped, and any running terminal task was asked to stop.";
       const stoppedMessages: ChatMessage[] = [
         ...baseMessages,
         {
@@ -1004,11 +1004,11 @@ export function useAiAssistant({
         },
       ];
       setMessages(stoppedMessages);
-      setStatus("已停止本次生成");
+      setStatus("Generation stopped");
       return stoppedMessages;
     }
 
-    const executionContent = `PowerShell 执行结果：\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``;
+    const executionContent = `PowerShell execution output:\n\n\`\`\`text\n${resultLines.join("\n\n").slice(0, 18000)}\n\`\`\``;
     const nextMessages: ChatMessage[] = [
       ...baseMessages,
       {
@@ -1017,7 +1017,7 @@ export function useAiAssistant({
       },
     ];
     setMessages(nextMessages);
-    setStatus("AI 正在整理 PowerShell 执行结果...");
+    setStatus("The AI is organizing the PowerShell execution output...");
 
     const bridge = window.novayxk;
     if (!bridge) {
@@ -1035,25 +1035,25 @@ export function useAiAssistant({
           role: "system",
           content: `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
 
-【命令结果整理规则】
-Novayxk 已经自动执行了你刚才通过 powershell-run 请求的命令。你现在必须基于命令输出直接回答用户原始问题。
-- 不要再要求用户执行命令、复制输出或“把结果发我”。
-- 先给明确结论，再给必要的简短解释。
-- 如果命令失败，说明失败原因和下一步建议。
-- 如果命令输出为空、被截断、没有展示出来，或退出码不是 0，严禁说“跑通了”“成功了”“这次是真的”；只能说当前没有足够证据证明成功。
-- 如果为了完成用户原始任务必须继续执行下一步命令，可以继续输出完整的 powershell-run 代码块；不要把要执行的命令写成普通文字，也不要声称尚未执行的命令已经开始。
-- 如果你发现自己准备重复上一轮或前几轮已经执行过的命令，不要继续输出命令；请总结为什么卡住、已经尝试了什么、建议用户下一步怎么确认。
-- 如果只是给建议或可选操作，不要再输出 powershell-run、fileops 或 diff 代码块。
-${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` : ""}`,
+[Command result reply rules]
+Novayxk already executed the commands you requested through powershell-run. You must now answer the user's original question directly from the real command output.
+- Do not ask the user to run commands again, copy output, or "send me the result".
+- Start with a clear conclusion, then add only the necessary short explanation.
+- If a command failed, explain why it failed and what the next best step is.
+- If the command output is empty, truncated, not shown, or the exit code is not 0, do not claim success. Say there is not enough evidence to confirm success yet.
+- If the original user task truly requires another command, you may output a complete powershell-run block for the next step. Do not write commands as plain text, and do not claim an unexecuted command has already started.
+- If you notice you are about to repeat a command that already ran in the previous turn or earlier turns, stop outputting commands. Summarize why the flow is stuck, what has already been tried, and how the user can verify the next step.
+- If you are only giving advice or optional actions, do not output powershell-run, fileops, or diff blocks.
+${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNote}` : ""}`,
         },
         ...sanitizeChatHistory(baseMessages).slice(-getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
         {
           role: "user",
-          content: `Novayxk 已经自动执行了 PowerShell 命令。请直接回答我最开始的问题，不要只复述原始输出。\n\n${executionContent}`,
+          content: `Novayxk already executed the PowerShell command automatically. Please answer my original question directly instead of only repeating the raw output.\n\n${executionContent}`,
         },
       ];
 
-      await runModelRequestWithRetries("模型总结请求", async () => {
+      await runModelRequestWithRetries("Model summary request", async () => {
         summaryContent = "";
         setMessages([...nextMessages, { role: "assistant", content: "" }]);
         await bridge.chatStream(
@@ -1071,12 +1071,12 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
       });
 
       const finalSummaryContent = stripPrematurePowerShellResultText(normalizeAssistantToolCallContent(summaryContent)).trim();
-      const summaryUsage = buildEstimatedTokenUsage(summaryMessages, finalSummaryContent || "命令已经执行完成，但模型没有返回总结。");
+      const summaryUsage = buildEstimatedTokenUsage(summaryMessages, finalSummaryContent || "The command finished, but the model did not return a summary.");
       let finalMessages: ChatMessage[] = [
         ...nextMessages,
         {
           role: "assistant",
-          content: finalSummaryContent || "命令已经执行完成，但模型没有返回总结。",
+          content: finalSummaryContent || "The command finished, but the model did not return a summary.",
           elapsedMs: Date.now() - summaryStartedAt,
           tokenUsage: summaryUsage,
         },
@@ -1084,7 +1084,7 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
       setMessages(finalMessages);
       const followUpCommands = extractPowerShellCommandRequests(finalSummaryContent);
       if (followUpCommands.length && commandLoopState.rounds < COMMAND_LOOP_SAFETY_LIMIT) {
-        setStatus("检测到后续 PowerShell 步骤，继续执行...");
+        setStatus("Detected follow-up PowerShell steps. Continuing...");
         return executeAiPowerShellCommands(finalSummaryContent, finalMessages, commandLoopState);
       }
       if (followUpCommands.length) {
@@ -1093,18 +1093,18 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
           {
             role: "assistant",
             content:
-              "Novayxk 已触发连续 PowerShell 执行保险丝：连续步骤过多。为了避免卡死或重复安装，我已停止自动继续。请检查前面的执行结果后再确认下一步。",
+              "Novayxk triggered the repeated PowerShell safety fuse because there were too many consecutive steps. Automatic continuation was stopped to avoid hanging or repetitive installs. Check the earlier execution results before confirming the next step.",
           },
         ];
         setMessages(safetyMessages);
-        setStatus("连续 PowerShell 步骤过多，已触发保险丝");
+        setStatus("Too many consecutive PowerShell steps triggered the safety fuse");
         return safetyMessages;
       }
       const verification = await buildCommandVerificationSummary(
         baseMessages,
         commandResults,
         executionContent,
-        finalSummaryContent || "命令已经执行完成，但模型没有返回总结。",
+        finalSummaryContent || "The command finished, but the model did not return a summary.",
       );
       if (verification.note) {
         const lastMessage = finalMessages[finalMessages.length - 1];
@@ -1118,15 +1118,15 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
         ];
         setMessages(finalMessages);
       }
-      setStatus(commandLoopState.rounds > 1 ? "AI PowerShell 连续步骤执行完成" : "AI PowerShell 执行完成，并已生成结论");
+      setStatus(commandLoopState.rounds > 1 ? "AI PowerShell multi-step execution completed" : "AI PowerShell execution completed and a conclusion was generated");
       return finalMessages;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "命令结果总结失败";
+      const message = error instanceof Error ? error.message : "Failed to summarize the command result";
       if (message === STREAM_ABORT_MESSAGE) {
-        setStatus("已停止本次生成");
+        setStatus("Generation stopped");
         return nextMessages;
       }
-      setStatus(formatActionableError(error, "整理命令结果失败"));
+      setStatus(formatActionableError(error, "Failed to summarize the command result"));
       return nextMessages;
     }
   }
@@ -1143,7 +1143,7 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
     return results
       .map((result, index) => {
         const action = actions[index];
-        return `- ${result.ok ? "成功" : "失败"} · ${formatBrowserActionLabel(action)} · ${result.preview}`;
+        return `- ${result.ok ? "Success" : "Failed"} · ${formatBrowserActionLabel(action)} · ${result.preview}`;
       })
       .join("\n");
   }
@@ -1166,10 +1166,10 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
     const script = action.type === "runScript" ? action.script : "";
     const target = `${selector} ${text} ${script}`.toLowerCase();
     if (SENSITIVE_AUTOMATION_PATTERN.test(target)) {
-      return "下一步涉及登录凭据、Token、Cookie、鉴权头或抓取登录接口细节，需要你手动处理；Novayxk 不会自动执行这类浏览器动作。";
+      return "The next step involves login credentials, tokens, cookies, authorization headers, or captured login API details. You need to handle that manually; Novayxk will not execute this kind of browser action automatically.";
     }
     if (/(password|passwd|pwd|current-password|new-password|one-time-code|otp|totp|mfa|2fa|verification|captcha|验证码|校验码|动态码|密码|二次验证|两步验证)/i.test(target)) {
-      return "下一步涉及密码、验证码或二次验证，需要你在内嵌浏览器里手动完成。";
+      return "The next step involves a password, verification code, or secondary verification, so you need to complete it manually in the embedded browser.";
     }
     return "";
   }
@@ -1208,7 +1208,7 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
     try {
       browserContext = await getBrowserPromptContext();
     } catch (error) {
-      setStatus(formatActionableError(error, "读取浏览器上下文失败"));
+      setStatus(formatActionableError(error, "Failed to read browser context"));
       return "";
     }
 
@@ -1217,28 +1217,28 @@ ${resultJudgementNote ? `\n\n【结果判定护栏】\n${resultJudgementNote}` :
         role: "system",
         content: `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
 
-【浏览器续步规则】
-Novayxk 刚刚已经自动执行了一轮 browser-actions。你现在必须基于最新页面状态判断是否还需要继续下一步。
-- 如果还需要继续点击、输入、等待、滚动或提取页面信息，请返回一个完整的 \`\`\`browser-actions JSON\`\`\` 代码块。
-- 如果当前阶段已经完成，或者下一步需要用户手动处理（例如密码、验证码、二次验证、支付、外部授权确认），就直接用一句简短中文说明，不要输出 browser-actions。
-- 优先识别页面里最明显的主按钮，例如“继续”“下一步”“登录”“确认”“提交”。
-- 不要重复输出和前一轮完全相同的点击/输入动作，除非只是短暂等待页面变化。
-- 一次最多给 1 到 3 个紧密相连的动作。`,
+[Browser continuation rules]
+Novayxk has just completed one round of browser-actions. Decide from the latest page state whether another step is still needed.
+- If another click, input, wait, scroll, or extraction step is still needed, return a complete \`\`\`browser-actions JSON\`\`\` block.
+- If the current stage is done, or the next step requires the user to act manually, such as entering a password, a verification code, completing 2FA, making a payment, or confirming external authorization, reply with one short sentence and do not output browser-actions.
+- Prefer the most obvious primary action on the page, such as "Continue", "Next", "Sign in", "Confirm", or "Submit".
+- Do not repeat the exact same click or input sequence from the previous round unless you are only waiting briefly for the page to change.
+- Return at most 1 to 3 closely connected actions at a time.`,
       },
       ...sanitizeChatHistory(baseMessages).slice(-getAssistantModeProfile(assistantMode).continuationHistoryLimit),
       {
         role: "user",
-        content: `Novayxk 已经完成第 ${roundIndex} 轮浏览器动作。
+        content: `Novayxk completed browser action round ${roundIndex}.
 
-执行结果：
+Execution result:
 ${roundSummary}
 ${browserContext}
 
-请判断现在是否需要继续下一步。`,
+Please decide whether another step is needed now.`,
       },
     ];
 
-    const reply = await runModelRequestWithRetries("模型续步请求", () =>
+    const reply = await runModelRequestWithRetries("Model continuation request", () =>
       bridge.chat({
         provider: activeProvider,
         messages: continuationMessages,
@@ -1256,18 +1256,18 @@ ${browserContext}
         ...baseMessages,
         {
           role: "assistant",
-          content: `检测到 browser-actions 代码块不完整或 JSON 解析失败。\n\n原因：${parseIssue}\n\n请把浏览器动作拆成严格 JSON 数组，例如先 navigate，再 click/type/waitFor，不要在代码块里混入注释或解释文字。`,
+          content: `An incomplete browser-actions block or JSON parsing failure was detected.\n\nReason: ${parseIssue}\n\nPlease split the browser actions into a strict JSON array, for example navigate first, then click/type/waitFor, and do not mix comments or explanation text into the code block.`,
         },
       ];
       setMessages(nextMessages);
-      setStatus("browser-actions 不完整，可能被模型输出长度截断");
+      setStatus("browser-actions is incomplete and may have been truncated by the model output length");
       return nextMessages;
     }
 
     if (!window.novayxk) {
       const blockedMessages: ChatMessage[] = [
         ...baseMessages,
-        { role: "assistant", content: "检测到浏览器动作，但当前不在 Electron 桌面环境，所以没有执行。" },
+        { role: "assistant", content: "Browser actions were detected, but they were not executed because the app is not currently running in the Electron desktop environment." },
       ];
       setMessages(blockedMessages);
       return blockedMessages;
@@ -1277,7 +1277,7 @@ ${browserContext}
     if (shouldOpenBrowserWorkspaceForActions(actions)) {
       openBrowserWorkspace();
     }
-    setStatus("AI 正在执行浏览器动作...");
+    setStatus("The AI is executing browser actions...");
 
     try {
       const actionVisitCounts = new Map<string, number>();
@@ -1296,7 +1296,7 @@ ${browserContext}
         roundIndex += 1;
         const results = await executeBrowserAutomation(safeActions);
         const roundSummary = formatBrowserRoundSummary(safeActions, results);
-        roundBlocks.push(`第 ${roundIndex} 轮：\n${roundSummary}`);
+        roundBlocks.push(`Round ${roundIndex}:\n${roundSummary}`);
 
         for (const action of safeActions) {
           const key = getBrowserActionLoopKey(action);
@@ -1304,7 +1304,7 @@ ${browserContext}
         }
 
         if (results.some((result) => !result.ok)) {
-          followUpNote = "自动续步已停止，因为上一轮存在失败动作。";
+          followUpNote = "Automatic continuation stopped because the previous round had a failed action.";
           break;
         }
 
@@ -1315,7 +1315,7 @@ ${browserContext}
 
         const continuationReply = await requestNextBrowserAutomationStep(baseMessages, roundSummary, roundIndex);
         if (!continuationReply) {
-          followUpNote = "已完成当前可自动推进的浏览器步骤。";
+          followUpNote = "The browser steps that can be advanced automatically are complete for now.";
           break;
         }
 
@@ -1331,16 +1331,16 @@ ${browserContext}
           return (actionVisitCounts.get(key) ?? 0) >= BROWSER_AUTOMATION_REPEAT_LIMIT;
         });
         if (allRepeated) {
-          followUpNote = "自动续步已停止，因为模型反复给出了相同的浏览器动作。";
+          followUpNote = "Automatic continuation stopped because the model kept returning the same browser actions.";
           break;
         }
 
         pendingActions = nextActions;
-        setStatus(`检测到浏览器后续步骤，继续执行第 ${roundIndex + 1} 轮...`);
+        setStatus(`Detected follow-up browser steps. Continuing with round ${roundIndex + 1}...`);
       }
 
       if (!followUpNote && pendingActions.length && roundIndex >= BROWSER_AUTOMATION_LOOP_LIMIT) {
-        followUpNote = "已达到浏览器自动续步上限，避免在当前页面重复循环。";
+        followUpNote = "Reached the browser auto-continuation limit to avoid repeating the same loop on the current page.";
       }
       const verification = await buildBrowserVerificationSummary(baseMessages, roundBlocks, followUpNote);
 
@@ -1349,26 +1349,26 @@ ${browserContext}
         {
           role: "assistant",
           content: appendVerificationNote(
-            `浏览器动作已自动执行：\n\n${roundBlocks.join("\n\n")}${followUpNote ? `\n\n${followUpNote}` : ""}`,
+            `Browser actions were executed automatically:\n\n${roundBlocks.join("\n\n")}${followUpNote ? `\n\n${followUpNote}` : ""}`,
             verification.note,
           ),
           ...(verification.tokenUsage ? { tokenUsage: verification.tokenUsage } : {}),
         },
       ];
       setMessages(nextMessages);
-      setStatus(followUpNote || "浏览器动作执行完成");
+      setStatus(followUpNote || "Browser actions completed");
       return nextMessages;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "浏览器动作执行失败";
+      const message = error instanceof Error ? error.message : "Browser actions failed";
       const nextMessages: ChatMessage[] = [
         ...baseMessages,
         {
           role: "assistant",
-          content: `浏览器动作自动执行失败：${message}`,
+          content: `Automatic browser actions failed: ${message}`,
         },
       ];
       setMessages(nextMessages);
-      setStatus(formatActionableError(error, "浏览器动作执行失败"));
+      setStatus(formatActionableError(error, "Browser actions failed"));
       return nextMessages;
     }
   }
@@ -1382,10 +1382,10 @@ ${browserContext}
     const bridge = window.novayxk;
     if (!bridge) return partialContent;
 
-    setStatus("模型上一条回复没说完，正在补全...");
+    setStatus("The model's previous reply was incomplete. Recovering it...");
     let recoveredContent = "";
 
-    await runModelRequestWithRetries("模型补全请求", async () => {
+    await runModelRequestWithRetries("Model recovery request", async () => {
       recoveredContent = "";
       await bridge.chatStream(
         {
@@ -1399,15 +1399,15 @@ ${browserContext}
             {
               role: "user",
               content:
-                `你上一条回复停在了半句，没有给出完整答复。请输出一条“完整替换版”回复，不要续写残句。\n\n` +
-                `要求：\n` +
-                `1. 如果这轮需要代为检查或执行，就直接给完整的 powershell-run / fileops / 补丁内容。\n` +
-                `2. 如果不需要执行，就直接给完整结论。\n` +
-                `3. 如果这轮是在分析浏览器轨迹、页面操作、API 请求或项目结构，就直接给完整时间线、关键接口、关键文件和你看不到的缺口。\n` +
-                `4. 不要只写“我来查一下：”“如下：”“先帮你看一下：”“让我把轨迹读出来”这类引子。\n` +
-                `5. 如果是检查类任务，单次查询空输出只能说“这次未查到”，不要直接断言“不存在”或“没安装”。\n` +
-                `6. 如果这轮任务适合先列计划，计划必须是极简的 2 到 4 步，而且在同一条回复里继续给阶段结果、结论或下一步动作，不能只停在计划。\n` +
-                `7. 这轮任务类型是：${userIntent.kind === "inspect" ? "状态核实" : userIntent.kind === "execute" ? "代为操作" : "解释问答"}。`,
+                `Your previous reply stopped mid-sentence and did not provide a complete answer. Output one full replacement reply instead of continuing the fragment.\n\n` +
+                `Requirements:\n` +
+                `1. If this turn requires inspection or execution, output the complete powershell-run / fileops / patch content directly.\n` +
+                `2. If no execution is needed, give the full conclusion directly.\n` +
+                `3. If this turn is about browser traces, page actions, API requests, or project structure, give the full timeline, key interfaces, key files, and any gaps you cannot see.\n` +
+                `4. Do not write only lead-ins such as "Let me check", "Here it is", or "Let me read the trace first".\n` +
+                `5. For inspection tasks, if a single query returns no output, say only "this check did not find it" instead of asserting that it does not exist or is not installed.\n` +
+                `6. If this task benefits from a plan first, the plan must be an ultra-short 2-to-4-step plan, and the same reply must continue with results, conclusions, or the next action instead of stopping at the plan.\n` +
+                `7. The task type this turn is: ${userIntent.kind === "inspect" ? "status verification" : userIntent.kind === "execute" ? "hands-on execution" : "explanation and Q&A"}.`,
             },
           ],
         },
@@ -1426,7 +1426,7 @@ ${browserContext}
     }
 
     if (isLikelyIncompleteAssistantReply(normalizedRecoveredContent, userIntent)) {
-      return `${normalizedRecoveredContent}\n\n模型这次回复仍然不完整。请重试，或换一种更明确的说法让我继续。`;
+      return `${normalizedRecoveredContent}\n\nThe model reply is still incomplete. Please try again, or rephrase the request more clearly so I can continue.`;
     }
 
     return normalizedRecoveredContent;
@@ -1441,10 +1441,10 @@ ${browserContext}
     const bridge = window.novayxk;
     if (!bridge) return partialContent;
 
-    setStatus("检测到自动执行格式不对，正在纠正...");
+    setStatus("Detected an invalid automation format. Correcting it...");
     let recoveredContent = "";
 
-    await runModelRequestWithRetries("自动执行格式修正请求", async () => {
+    await runModelRequestWithRetries("Automation format repair request", async () => {
       recoveredContent = "";
       await bridge.chatStream(
         {
@@ -1458,15 +1458,15 @@ ${browserContext}
             {
               role: "user",
               content:
-                `你上一条回复里的自动执行内容不能被 Novayxk 正确执行。请输出一条完整替换版回复，不要续写残句。\n\n` +
-                `当前问题：${issue}\n\n` +
-                `必须遵守：\n` +
-                `1. 如果是项目内文件修改，只能输出合法的 \`\`\`fileops\`\`\` JSON 数组，字段只能是 type/path/content/overwrite/search/replace/occurrence。\n` +
-                `2. fileops 的 path 必须是当前项目内相对路径，不能写桌面、下载、文档等绝对路径。\n` +
-                `3. 如果目标是桌面、下载、系统目录、浏览器打开、外部网页、系统文件或任意项目外路径，必须改用 \`\`\`powershell-run\`\`\`。\n` +
-                `4. 不要再输出 { operation/create/path/content } 这种旧格式 JSON。\n` +
-                `5. 如果需要长内容，优先分步骤，不要只给引子。\n` +
-                `6. 只输出最终可执行的完整替换版回复。`,
+                `The automation content in your previous reply cannot be executed correctly by Novayxk. Output one full replacement reply instead of continuing the fragment.\n\n` +
+                `Current issue: ${issue}\n\n` +
+                `You must follow these rules:\n` +
+                `1. For project file changes, output only a valid \`\`\`fileops\`\`\` JSON array. The only allowed fields are type, path, content, overwrite, search, replace, and occurrence.\n` +
+                `2. Every fileops path must be a relative path inside the current project. Do not use absolute paths such as Desktop, Downloads, or Documents.\n` +
+                `3. If the target is the Desktop, Downloads, a system directory, a browser open action, an external webpage, a system file, or any path outside the project, use \`\`\`powershell-run\`\`\` instead.\n` +
+                `4. Do not output the old JSON shape like { operation/create/path/content } again.\n` +
+                `5. If the content is long, prefer multiple steps instead of only giving a lead-in.\n` +
+                `6. Output only the final complete replacement reply that can actually run.`,
             },
           ],
         },
@@ -1516,18 +1516,18 @@ ${browserContext}
     const responseStartedAt = Date.now();
     setLoadingStartedAt(responseStartedAt);
     setLoadingElapsedMs(0);
-    setStatus("正在准备请求...");
+    setStatus("Preparing the request...");
     await waitForUiCommit();
 
     if (isImageGenerationMode(activeProvider.apiMode) || isLikelyImageModel(activeProvider.model)) {
       try {
         if (!window.novayxk) {
-          throw new Error("当前在浏览器预览模式，图片生成需要用 Electron 启动。");
+          throw new Error("You are currently in browser preview mode. Image generation requires the Electron app.");
         }
         const bridge = window.novayxk;
 
-        setStatus("正在生成图片...");
-        const result = await runModelRequestWithRetries("图片生成请求", () =>
+        setStatus("Generating image...");
+        const result = await runModelRequestWithRetries("Image generation request", () =>
           bridge.generateImage({
             provider: activeProvider,
             prompt: trimmed,
@@ -1536,11 +1536,11 @@ ${browserContext}
           }),
         );
         const revisedPrompts = result.images
-          .map((image, index) => image.revisedPrompt ? `图片 ${index + 1} 修订提示词：${image.revisedPrompt}` : "")
+          .map((image, index) => image.revisedPrompt ? `Image ${index + 1} revised prompt: ${image.revisedPrompt}` : "")
           .filter(Boolean);
         const verification = buildImageVerificationSummary(result.images.length);
         const completedContent = appendVerificationNote([
-          result.message || `图片生成完成：${result.images.length} 张`,
+          result.message || `Image generation complete: ${result.images.length} image(s)`,
           ...revisedPrompts,
         ].join("\n\n"), verification.note);
         const completedMessages: ChatMessage[] = [
@@ -1554,23 +1554,23 @@ ${browserContext}
         ];
         setMessages(completedMessages);
         await saveCurrentTask(completedMessages);
-        setStatus(result.message || "图片生成完成");
+        setStatus(result.message || "Image generation complete");
       } catch (error) {
-        const rawMessage = error instanceof Error ? error.message : "图片生成失败";
+        const rawMessage = error instanceof Error ? error.message : "Image generation failed";
         if (rawMessage === STREAM_ABORT_MESSAGE) {
           const stoppedMessages: ChatMessage[] = [
             ...nextMessages,
             {
               role: "assistant",
-              content: "已停止本次生成。",
+              content: "Generation stopped.",
               elapsedMs: Date.now() - responseStartedAt,
             },
           ];
           setMessages(stoppedMessages);
-          setStatus("已停止本次生成");
+          setStatus("Generation stopped");
           await saveCurrentTask(stoppedMessages);
         } else {
-          const content = formatActionableError(error, "图片生成失败");
+          const content = formatActionableError(error, "Image generation failed");
           setMessages([
             ...nextMessages,
             {
@@ -1596,23 +1596,23 @@ ${browserContext}
     const projectContext = contextMode === "full" ? await buildProjectContextForPrompt(trimmed) : "";
     const browserContext = await buildBrowserContextForPrompt(trimmed);
     const selectedFileContext = contextMode === "full" && selectedFile?.kind === "text"
-      ? `\n\n当前选中文件：${selectedFile.path}\n\`\`\`\n${selectedFile.content.slice(0, assistantModeProfile.selectedFileLimit)}\n\`\`\``
+      ? `\n\nCurrent selected file: ${selectedFile.path}\n\`\`\`\n${selectedFile.content.slice(0, assistantModeProfile.selectedFileLimit)}\n\`\`\``
       : "";
     const runtimeContext = contextMode === "runtime" && project
-      ? `\n\n运行上下文：当前项目根目录是 ${project.root}。如需执行命令，命令会在该目录运行。不要主动复述这个路径。`
+      ? `\n\nRuntime context: the current project root is ${project.root}. If a command needs to be executed, it will run in this directory. Do not repeat this path unless it is necessary.`
       : "";
     const lightPlanContext =
       userIntent.needsLightPlan
-        ? "\n\n轻量计划要求：如果这轮任务明显是多步骤、先看再总结、先排查再修复或需要避免半路忘记，可以先用 2 到 4 条极简步骤组织答案；但计划后必须立刻继续给已完成的观察、结论、代码、命令或下一步动作，不能只停在计划或引子。"
+        ? "\n\nLight planning rule: if this turn is clearly multi-step, involves inspect-then-summarize, debug-then-fix, or needs a structure that prevents losing track halfway through, you may first organize the answer into 2 to 4 ultra-short steps. But the same reply must immediately continue with completed observations, conclusions, code, commands, or the next action. Do not stop at only the plan or a lead-in."
         : "";
 
     let streamedContent = "";
     let requestMessages: ChatMessage[] = [];
-    setStatus("正在请求模型...");
+    setStatus("Requesting the model...");
 
     try {
       if (!window.novayxk) {
-        throw new Error("当前在浏览器预览模式，真实模型请求需要用 Electron 启动。");
+        throw new Error("You are currently in browser preview mode. Real model requests require the Electron app.");
       }
       const bridge = window.novayxk;
 
@@ -1633,7 +1633,7 @@ ${browserContext}
       ];
 
       setMessages([...nextMessages, { role: "assistant", content: "" }]);
-      await runModelRequestWithRetries("模型请求", async () => {
+      await runModelRequestWithRetries("Model request", async () => {
         streamedContent = "";
         setMessages([...nextMessages, { role: "assistant", content: "" }]);
         await bridge.chatStream(
@@ -1680,11 +1680,11 @@ ${browserContext}
         ? await executeAiPowerShellCommands(completedContent, browserActionMessages ?? fileOpMessages ?? completedMessages)
         : null;
       await saveCurrentTask(commandResultMessages ?? browserActionMessages ?? fileOpMessages ?? completedMessages);
-      setStatus(commandResultMessages ? "模型已整理命令结果" : "模型响应完成");
+      setStatus(commandResultMessages ? "The model has organized the command result" : "Model response complete");
     } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : "模型请求失败";
+      const rawMessage = error instanceof Error ? error.message : "Model request failed";
       if (rawMessage === STREAM_ABORT_MESSAGE) {
-        const stoppedContent = normalizeAssistantToolCallContent(streamedContent).trim() || "已停止本次生成。";
+        const stoppedContent = normalizeAssistantToolCallContent(streamedContent).trim() || "Generation stopped.";
         const stoppedMessages: ChatMessage[] = [
           ...nextMessages,
           {
@@ -1695,13 +1695,13 @@ ${browserContext}
           },
         ];
         setMessages(stoppedMessages);
-        setStatus("已停止本次生成");
+        setStatus("Generation stopped");
         if (streamedContent.trim()) {
           await saveCurrentTask(stoppedMessages);
         }
         return;
       }
-      const content = formatActionableError(error, "请求模型失败");
+      const content = formatActionableError(error, "Model request failed");
       setMessages([
         ...nextMessages,
         {
@@ -1736,7 +1736,7 @@ ${browserContext}
     setPrompt("");
     setIsLoading(true);
     setIsStopping(false);
-    setStatus("已切换到管理员模式，正在继续刚才的系统操作...");
+    setStatus("Administrator mode is active. Resuming the interrupted system task...");
     setLoadingStartedAt(Date.now());
     setLoadingElapsedMs(0);
 
@@ -1745,7 +1745,7 @@ ${browserContext}
       : sanitizeChatHistory(messages);
     const resumeIntro = {
       role: "assistant" as const,
-      content: `已切换到管理员模式，继续执行刚才中断的系统操作：\n\n\`\`\`powershell\n${commandText}\n\`\`\``,
+      content: `Administrator mode is now active. Resuming the interrupted system task:\n\n\`\`\`powershell\n${commandText}\n\`\`\``,
     };
     const nextMessages: ChatMessage[] = [...resumeBaseMessages, resumeIntro];
     setMessages(nextMessages);
@@ -1754,9 +1754,9 @@ ${browserContext}
       const resumedMessages = await executeAiPowerShellCommands(`\`\`\`powershell-run\n${commandText}\n\`\`\``, nextMessages);
       await saveCurrentTask(resumedMessages ?? nextMessages);
       await clearPendingAdminResume();
-      setStatus("已在管理员模式下继续执行刚才的操作");
+      setStatus("The previous task resumed in administrator mode");
     } catch (error) {
-      const content = formatActionableError(error, "恢复管理员任务失败");
+      const content = formatActionableError(error, "Failed to resume the administrator task");
       const failedMessages: ChatMessage[] = [
         ...nextMessages,
         {
@@ -1784,7 +1784,7 @@ ${browserContext}
         ? activeTerminalTask
         : terminalTasks.find((task) => task.status === "running") ?? null;
     setIsStopping(true);
-    setStatus(runningTask ? `正在停止生成和终端任务：${runningTask.title}` : "正在停止生成...");
+    setStatus(runningTask ? `Stopping generation and terminal task: ${runningTask.title}` : "Stopping generation...");
     try {
       const stopTerminalPromise = runningTask
         ? window.novayxk.stopTerminalTask(runningTask.id)
@@ -1805,10 +1805,10 @@ ${browserContext}
       if (failedResult?.status === "rejected") {
         throw failedResult.reason;
       }
-      setStatus(runningTask ? `正在停止终端任务：${runningTask.title}` : "正在停止生成...");
+      setStatus(runningTask ? `Stopping terminal task: ${runningTask.title}` : "Stopping generation...");
     } catch (error) {
       setIsStopping(false);
-      setStatus(error instanceof Error ? error.message : "停止生成失败");
+      setStatus(error instanceof Error ? error.message : "Failed to stop generation");
     }
   }
 

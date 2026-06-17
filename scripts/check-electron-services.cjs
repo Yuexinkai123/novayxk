@@ -57,8 +57,8 @@ if (!/setMainActiveProjectRoot\(activeProjectRoot\)/.test(projectSource)) {
 }
 
 const installerSource = fs.readFileSync(path.join(root, "installer", "main.cjs"), "utf8");
-if (!/closeRunningAppProcesses/.test(installerSource) || !/安装目录正在被占用/.test(installerSource)) {
-  console.error("installer/main.cjs must close running Novayxk processes and show a friendly busy-directory message.");
+if (!/closeRunningAppProcesses/.test(installerSource) || !/install directory is currently in use|INSTALL_DIR_BUSY/i.test(installerSource)) {
+  console.error("installer/main.cjs must close running Novayxk processes and show a friendly install-directory busy message.");
   process.exit(1);
 }
 

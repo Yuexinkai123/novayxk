@@ -85,7 +85,7 @@ label {
 
 .installer-shell {
   display: grid;
-  grid-template-columns: 420px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   overflow: hidden;
@@ -95,10 +95,11 @@ label {
 .visual-panel {
   position: relative;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 28px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  align-content: start;
+  gap: 20px;
   overflow: hidden;
-  padding: 20px 26px 28px;
+  padding: 20px 24px 24px;
   color: #eef3f8;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 26%),
@@ -108,12 +109,7 @@ label {
 }
 
 .visual-panel::before {
-  position: absolute;
-  inset: 92px 24px 24px 24px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 20px;
-  content: "";
-  pointer-events: none;
+  display: none;
 }
 
 .chrome-strip,
@@ -127,6 +123,7 @@ label {
 .chrome-strip,
 .titlebar,
 .window-controls,
+.titlebar-meta,
 .brand-lockup,
 .path-picker,
 .option-row,
@@ -179,6 +176,8 @@ label {
 
 .brand-lockup {
   gap: 16px;
+  align-items: center;
+  margin-top: 4px;
 }
 
 .brand-mark {
@@ -208,7 +207,7 @@ p {
 }
 
 .brand-copy h1 {
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1;
   font-weight: 700;
 }
@@ -216,14 +215,22 @@ p {
 .brand-copy p {
   margin-top: 6px;
   color: rgba(238, 243, 248, 0.66);
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.04em;
+  line-height: 1.5;
 }
 
 .install-copy {
-  align-self: center;
   display: grid;
-  gap: 16px;
+  gap: 0;
+  max-width: 100%;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 65%),
+    rgba(255, 255, 255, 0.018);
+  backdrop-filter: blur(10px);
 }
 
 .eyebrow,
@@ -252,10 +259,10 @@ p {
 }
 
 .install-copy p {
-  max-width: 320px;
-  color: rgba(238, 243, 248, 0.72);
+  max-width: 100%;
+  color: rgba(238, 243, 248, 0.8);
   font-size: 14px;
-  line-height: 1.8;
+  line-height: 1.75;
 }
 
 .metric-grid {
@@ -300,10 +307,40 @@ p {
   padding: 12px 16px 8px 28px;
 }
 
+.titlebar-meta {
+  gap: 12px;
+}
+
 #versionLabel {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(23, 33, 43, 0.05);
+}
+
+.language-button {
+  min-width: 54px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.language-button.active {
+  background: #18222e;
+  color: #f6f8fb;
 }
 
 .window-controls {

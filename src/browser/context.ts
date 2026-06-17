@@ -132,8 +132,10 @@ export function formatBrowserApiEvidence(network: BrowserNetworkRecord[], limit 
   if (!records.length) return "";
 
   const lines: string[] = [];
-  lines.push("浏览器 API 证据包（按真实捕获时间排序，敏感值已脱敏）：");
-  lines.push("规则：写脚本时必须优先依据这里的真实 method/url/header 名称/request body/response 字段；不要根据历史聊天猜 token/session/access_token。");
+  lines.push("Browser API evidence pack (sorted by real capture time, sensitive values redacted):");
+  lines.push(
+    "Rule: when writing scripts, prioritize the real method, URL, header names, request body, and response fields captured here. Do not guess token, session, or access_token values from older chat history.",
+  );
   records.forEach((record, index) => {
     const requestHeaders = formatHeaderEvidence(record.requestHeaders);
     const responseHeaders = formatHeaderEvidence(record.responseHeaders, 5);
@@ -159,23 +161,23 @@ export function formatBrowserPromptContext(params: {
   const { snapshot, page, actions, network, trace } = params;
   const lines: string[] = [];
 
-  lines.push("当前浏览器工作区上下文：");
-  lines.push(`- 当前 URL: ${snapshot.currentUrl}`);
-  lines.push(`- 页面标题: ${snapshot.title || "未知"}`);
-  lines.push(`- 加载状态: ${snapshot.isLoading ? "加载中" : "空闲"}`);
+  lines.push("Current browser workspace context:");
+  lines.push(`- Current URL: ${snapshot.currentUrl}`);
+  lines.push(`- Page title: ${snapshot.title || "Unknown"}`);
+  lines.push(`- Load state: ${snapshot.isLoading ? "Loading" : "Idle"}`);
 
   if (page) {
     lines.push(`- DOM readyState: ${page.readyState}`);
-    if (page.headings.length) lines.push(`- 页面标题节点: ${page.headings.join(" | ").slice(0, 500)}`);
-    if (page.buttons.length) lines.push(`- 可见按钮: ${page.buttons.join(" | ").slice(0, 500)}`);
+    if (page.headings.length) lines.push(`- Visible headings: ${page.headings.join(" | ").slice(0, 500)}`);
+    if (page.buttons.length) lines.push(`- Visible buttons: ${page.buttons.join(" | ").slice(0, 500)}`);
     if (page.inputs.length) {
       lines.push(
-        `- 输入控件: ${page.inputs.map((item) => `${item.selector} (${item.label || item.type})`).join(" | ").slice(0, 600)}`,
+        `- Input controls: ${page.inputs.map((item) => `${item.selector} (${item.label || item.type})`).join(" | ").slice(0, 600)}`,
       );
     }
     if (page.links.length) {
       lines.push(
-        `- 链接: ${page.links.map((item) => `${item.text || item.href} -> ${item.href}`).join(" | ").slice(0, 700)}`,
+        `- Links: ${page.links.map((item) => `${item.text || item.href} -> ${item.href}`).join(" | ").slice(0, 700)}`,
       );
     }
   }
@@ -185,7 +187,7 @@ export function formatBrowserPromptContext(params: {
     .map((item) => `${item.type} ${item.targetLabel || item.selector || item.url}`)
     .filter(Boolean);
   if (recentActions.length) {
-    lines.push(`- 最近浏览器操作: ${recentActions.join(" | ").slice(0, 500)}`);
+    lines.push(`- Recent browser actions: ${recentActions.join(" | ").slice(0, 500)}`);
   }
 
   const recentNetwork = network
@@ -197,7 +199,7 @@ export function formatBrowserPromptContext(params: {
     })
     .filter(Boolean);
   if (recentNetwork.length) {
-    lines.push(`- 最近网络请求: ${recentNetwork.join(" | ").slice(0, 700)}`);
+    lines.push(`- Recent network requests: ${recentNetwork.join(" | ").slice(0, 700)}`);
   }
 
   const apiEvidence = formatBrowserApiEvidence(network);
@@ -206,12 +208,12 @@ export function formatBrowserPromptContext(params: {
   }
 
   if (trace?.path) {
-    lines.push(`- 浏览器临时轨迹文件: ${trace.path}`);
+    lines.push(`- Temporary browser trace file: ${trace.path}`);
     if (trace.preview.trim()) {
-      lines.push(`- 浏览器轨迹最近片段(JSONL):\n${trace.preview.trim().slice(-6000)}`);
+      lines.push(`- Latest browser trace snippet (JSONL):\n${trace.preview.trim().slice(-6000)}`);
     }
   }
 
-  lines.push("如果要继续操作当前页面，优先基于这些控件、按钮、链接和当前 URL 输出 browser-actions。");
+  lines.push("If you need to continue operating on the current page, prefer generating browser-actions from these controls, buttons, links, and the current URL.");
   return `\n\n${lines.join("\n")}`;
 }

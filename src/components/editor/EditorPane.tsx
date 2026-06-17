@@ -1,12 +1,13 @@
 import React from "react";
 import { ChevronsUp, Code2, Save, Search, ShieldCheck, TriangleAlert } from "lucide-react";
-import type { AiControlMode } from "../../vite-env";
+import type { AiControlMode, AppLanguage } from "../../vite-env";
 import type { ProjectSelectedFile } from "../../vite-env";
-import { getExecutionModeHint } from "../../app/product";
 import type { WorkspaceGuideKind } from "../../app/workspaceGuide";
+import { getLocaleStrings } from "../../app/i18n";
 import { WorkspaceGuide } from "../onboarding/WorkspaceGuide";
 
 type EditorPaneProps = {
+  language: AppLanguage;
   selectedFile: ProjectSelectedFile | null;
   isEditorDirty: boolean;
   stats: {
@@ -31,6 +32,7 @@ type EditorPaneProps = {
 };
 
 export function EditorPane({
+  language,
   selectedFile,
   isEditorDirty,
   stats,
@@ -50,6 +52,7 @@ export function EditorPane({
   onSelectedFileContentChange,
   onEditorKeyDown,
 }: EditorPaneProps) {
+  const strings = getLocaleStrings(language).editor;
   const isTextFile = selectedFile?.kind === "text";
   const isImageFile = selectedFile?.kind === "image";
   const imageSizeLabel = isImageFile
@@ -63,7 +66,7 @@ export function EditorPane({
       <div className="editor-header">
         <div>
           {/* <span>代码上下文</span> */}
-          <strong>{selectedFile ? `${selectedFile.path}${isEditorDirty ? " *" : ""}` : "尚未选择文件"}</strong>
+          <strong>{selectedFile ? `${selectedFile.path}${isEditorDirty ? " *" : ""}` : strings.noFileSelected}</strong>
         </div>
         <div className="editor-header-actions">
           {isTextFile && (
@@ -72,8 +75,8 @@ export function EditorPane({
               <input
                 value={editorFind}
                 onChange={(event) => onEditorFindChange(event.target.value)}
-                placeholder="查找"
-                aria-label="查找当前文件"
+                placeholder={strings.find}
+                aria-label={strings.findLabel}
               />
               <span>{editorFind ? editorFindMatches : stats.lines}</span>
             </div>
@@ -82,22 +85,22 @@ export function EditorPane({
             className={`editor-tool-button ${isWordWrapEnabled ? "active" : ""}`}
             onClick={onToggleWordWrap}
             disabled={!isTextFile}
-            title="切换自动换行"
+            title={strings.toggleWordWrap}
           >
-            换行
+            {strings.wrap}
           </button>
           {isBottomCollapsed && (
-            <button className="panel-collapse-button" onClick={onShowBottomPanel} title="显示底部工具区">
+            <button className="panel-collapse-button" onClick={onShowBottomPanel} title={strings.showBottomTools}>
               <ChevronsUp size={15} />
             </button>
           )}
-          <button className="editor-save-button" onClick={onSaveSelectedFile} disabled={!isTextFile || !isEditorDirty} title="保存当前文件 Ctrl+S">
+          <button className="editor-save-button" onClick={onSaveSelectedFile} disabled={!isTextFile || !isEditorDirty} title={strings.saveCurrentFile}>
             <Save size={15} />
-            保存
+            {strings.save}
           </button>
           <div className="trust-chip">
             {aiControlMode === "full" ? <TriangleAlert size={15} /> : <ShieldCheck size={15} />}
-            {getExecutionModeHint(aiControlMode)}
+            {aiControlMode === "full" ? strings.systemExecutionEnabled : strings.projectExecutionEnabled}
           </div>
         </div>
       </div>
@@ -117,8 +120,8 @@ export function EditorPane({
                 onKeyDown={onEditorKeyDown}
               />
               <div className="editor-stats">
-                {stats.lines} 行 · {stats.characters} 字符
-                {editorFind ? ` · 匹配 ${editorFindMatches}` : ""}
+                {stats.lines} {strings.lines} · {stats.characters} {strings.characters}
+                {editorFind ? ` · ${editorFindMatches} ${strings.matches}` : ""}
               </div>
             </div>
           ) : isImageFile ? (
@@ -139,12 +142,13 @@ export function EditorPane({
                 onOpenSettings={onOpenSettings}
                 onOpenProject={onOpenProject}
                 onUsePrompt={onUseGuidePrompt}
+                language={language}
               />
             ) : null}
             <div className="empty-state">
               <Code2 size={44} />
-              <h2>打开项目并选择文件</h2>
-              <p>Novayxk 会把当前文件作为上下文协助你分析、修改和执行项目内任务。你也可以直接编辑文件，用 Ctrl+S 保存。</p>
+              <h2>{strings.emptyTitle}</h2>
+              <p>{strings.emptyBody}</p>
             </div>
           </div>
         )}

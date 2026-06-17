@@ -1,46 +1,46 @@
 import type { AiControlMode, AssistantMode } from "../vite-env";
 
 export const PRODUCT_NAME = "Novayxk";
-export const PRODUCT_TAGLINE = "Windows 本地 AI 项目工作台";
+export const PRODUCT_TAGLINE = "Windows-native AI Project Workspace";
 
 export function getExecutionModeLabel(mode: AiControlMode) {
-  return mode === "full" ? "系统级执行" : "项目内执行";
+  return mode === "full" ? "System" : "Project";
 }
 
 export function getExecutionModeTitle(mode: AiControlMode) {
   return mode === "full"
-    ? "允许 AI 执行系统级命令，例如安装软件、改系统设置或处理受保护目录"
-    : "允许 AI 执行项目目录内的常见开发命令，例如构建、测试、读取文件和修改代码";
+    ? "Allow AI to run system-level commands such as software installs, system settings changes, or protected-directory operations"
+    : "Allow AI to run common project commands such as builds, tests, file reads, and code edits inside the current workspace";
 }
 
 export function getExecutionModeStatus(mode: AiControlMode) {
-  return mode === "full" ? "已切换到系统级执行" : "已切换到项目内执行";
+  return mode === "full" ? "Switched to system execution" : "Switched to project execution";
 }
 
 export function getExecutionModeHint(mode: AiControlMode) {
-  return mode === "full" ? "系统级执行已开启" : "项目内执行已开启";
+  return mode === "full" ? "System execution enabled" : "Project execution enabled";
 }
 
 export function getAssistantModeLabel(mode: AssistantMode) {
-  if (mode === "low") return "极省";
-  if (mode === "deep") return "深度";
-  return "标准";
+  if (mode === "low") return "Low";
+  if (mode === "deep") return "Deep";
+  return "Standard";
 }
 
 export function getAssistantModeTitle(mode: AssistantMode) {
-  if (mode === "low") return "低 token 消耗：减少上下文和长解释，默认只做最低成本复查";
-  if (mode === "deep") return "深度协作：保留更多上下文，并在执行后做完整复查链路";
-  return "标准协作：在速度和完整度之间保持平衡，并补关键结果复查";
+  if (mode === "low") return "Lower token cost: less context, shorter explanations, and only the cheapest verification by default";
+  if (mode === "deep") return "Deeper collaboration: more context retained, with a fuller verification pass after actions";
+  return "Balanced collaboration: a middle ground between speed, context, completeness, and key-result verification";
 }
 
 export function getAssistantModeStatus(mode: AssistantMode) {
-  return `已切换到${getAssistantModeLabel(mode)}模式`;
+  return `Switched to ${getAssistantModeLabel(mode)} mode`;
 }
 
 export function getPrivilegeChipLabel(isAdmin: boolean | null | undefined) {
-  return isAdmin ? "系统权限: 管理员" : "系统权限: 普通";
+  return isAdmin ? "System Privilege: Admin" : "System Privilege: Standard";
 }
 
 export function getWorkspaceStatusLabel(hasProject: boolean) {
-  return hasProject ? "工作区: 已连接项目" : "工作区: 预览模式";
+  return hasProject ? "Workspace: Project connected" : "Workspace: Preview mode";
 }

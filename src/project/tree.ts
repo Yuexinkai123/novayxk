@@ -21,11 +21,11 @@ export function formatProjectContext(context: ProjectContext) {
   const relatedBlocks = context.relatedFiles
     .map(
       (file) =>
-        `\n\n相关文件：${file.path}${file.truncated ? "（已截断）" : ""}\n\`\`\`\n${file.content.slice(0, 8000)}\n\`\`\``,
+        `\n\nRelated file: ${file.path}${file.truncated ? " (truncated)" : ""}\n\`\`\`\n${file.content.slice(0, 8000)}\n\`\`\``,
     )
     .join("");
 
-  return `\n\n项目上下文摘要：${context.root}\n文件清单（节选 ${Math.min(visibleFiles.length, 180)}/${visibleFiles.length}）：\n${fileList || "- 无可读文件"}${relatedBlocks}`;
+  return `\n\nProject context summary: ${context.root}\nFile list (showing ${Math.min(visibleFiles.length, 180)}/${visibleFiles.length}):\n${fileList || "- No readable files"}${relatedBlocks}`;
 }
 
 export function filterFileTree(nodes: FileNode[], keyword: string): FileNode[] {

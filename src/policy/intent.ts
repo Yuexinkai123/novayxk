@@ -119,22 +119,22 @@ export function getUserIntentProfile(prompt: string): UserIntentProfile {
 
 export function buildUserIntentInstruction(profile: UserIntentProfile) {
   if (profile.kind === "execute") {
-    return `【本轮任务类型】代为操作。用户这轮明确要求你执行、安装、打开、修改、搜索或处理某件事。可以输出 powershell-run、fileops 或补丁，但要先说清这一步是在做什么，以及结果会影响哪里。${
+    return `Task type: hands-on execution. The user explicitly wants you to execute, install, open, modify, search for, or handle something this turn. You may output powershell-run, fileops, or a patch, but first make clear what this step is doing and what it may affect.${
       profile.needsLightPlan
-        ? " 这轮任务较复杂时，可以先给 2 到 4 条极简计划，但计划后必须继续执行或给出可直接落地的下一步，不能只停在计划。"
+        ? " If the task is complex, you may first give a 2-to-4-step ultra-short plan, but the same reply must continue into execution or the next directly actionable step instead of stopping at the plan."
         : ""
     }`;
   }
 
   if (profile.kind === "inspect") {
-    return `【本轮任务类型】状态核实。用户这轮主要是想确认电脑、环境、软件或项目的当前状态。凡是涉及当前电脑、本机软件、系统环境、安装状态、进程、服务、注册表或版本的判断，优先先查再答，不要只凭常识直接下结论。优先用 1 到 3 条最直接、最可靠的检查命令完成任务，不要为了显得全面就拼接很长的多段脚本，除非简单检查确实不够。若只做了单一来源检查，或命令输出为空、乱码、截断，不要直接下“不存在/没有安装”的结论。${
+    return `Task type: status verification. The user mainly wants to confirm the current state of the computer, environment, software, or project. For anything involving the current machine, installed software, system environment, installation state, processes, services, registry, or versions, check first and answer second instead of relying on assumptions. Prefer 1 to 3 of the most direct and reliable checks. Do not stitch together long multi-part scripts unless simple checks are truly insufficient. If you only checked one source, or the command output is empty, garbled, or truncated, do not conclude that something does not exist or is not installed.${
       profile.needsLightPlan
-        ? " 如果任务明显分阶段，比如先看项目再总结，可以先给极简计划，但必须在同一轮继续给检查结果或总结。"
+        ? " If the task clearly has stages, such as inspect first and summarize second, you may start with a minimal plan, but the same reply must continue with findings or a summary."
         : ""
     }`;
   }
 
-  return `【本轮任务类型】解释问答。用户这轮主要是在问概念、原理、区别或用途。先直接回答，不要为了顺手帮忙主动输出 powershell-run、fileops 或补丁，除非用户明确要求你代为执行。${
-    profile.needsLightPlan ? " 如果问题本身是复杂流程或多阶段分析，可以用极简计划组织答案，但不要只给计划。": ""
+  return `Task type: explanation and Q&A. The user is mainly asking about concepts, principles, differences, or use cases. Answer directly first. Do not proactively output powershell-run, fileops, or a patch unless the user explicitly asks you to execute on their behalf.${
+    profile.needsLightPlan ? " If the question itself is a complex process or a multi-stage analysis, you may use a minimal plan to organize the answer, but do not give only the plan." : ""
   }`;
 }

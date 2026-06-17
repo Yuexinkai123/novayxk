@@ -29,7 +29,7 @@ function isPreviewableImageFile(filePath: string) {
 
 async function loadProjectSelectedFile(relativePath: string): Promise<ProjectSelectedFile> {
   if (!window.novayxk) {
-    throw createDesktopBridgeUnavailableError("读取文件");
+    throw createDesktopBridgeUnavailableError("Reading a file");
   }
 
   if (isPreviewableImageFile(relativePath)) {
@@ -97,7 +97,7 @@ export function useProjectWorkspace({
         .catch((error: unknown) => {
           if (!cancelled) {
             setTreeSearchResults(null);
-            setStatus(formatActionableError(error, "搜索文件失败"));
+            setStatus(formatActionableError(error, "File search failed"));
           }
         })
         .finally(() => {
@@ -133,18 +133,18 @@ export function useProjectWorkspace({
   }, []);
 
   const openProject = React.useCallback(async () => {
-    setStatus("正在选择项目...");
+    setStatus("Selecting a project...");
     try {
       const payload = await window.novayxk?.openProject();
       if (payload) {
         await hydrateOpenedProject(payload);
         await saveLastProjectRoot(payload.root);
-        setStatus(`已打开项目：${payload.root}`);
+        setStatus(`Project opened: ${payload.root}`);
       } else {
-        setStatus("已取消选择项目");
+        setStatus("Project selection was cancelled");
       }
     } catch (error) {
-      setStatus(formatActionableError(error, "打开项目失败"));
+      setStatus(formatActionableError(error, "Failed to open the project"));
     }
   }, [hydrateOpenedProject, saveLastProjectRoot, setStatus]);
 
@@ -152,13 +152,13 @@ export function useProjectWorkspace({
     async (projectRoot: string) => {
       if (!window.novayxk) return;
       try {
-        setStatus(`正在恢复上次工作区：${projectRoot}`);
+        setStatus(`Restoring the last workspace: ${projectRoot}`);
         const payload = await window.novayxk.openProjectPath(projectRoot);
         await hydrateOpenedProject(payload);
-        setStatus(`已恢复上次工作区：${payload.root}`);
+        setStatus(`Last workspace restored: ${payload.root}`);
       } catch (error) {
         setProject(null);
-        setStatus(formatActionableError(error, "恢复上次工作区失败"));
+        setStatus(formatActionableError(error, "Failed to restore the last workspace"));
         await saveLastProjectRoot(null);
       }
     },
@@ -168,23 +168,23 @@ export function useProjectWorkspace({
   const saveSelectedFile = React.useCallback(async () => {
     if (!selectedFile || selectedFile.kind !== "text" || !isEditorDirty) return true;
     if (!project) {
-      setStatus("请先打开一个项目。");
+      setStatus("Open a project first.");
       return false;
     }
 
     try {
       if (!window.novayxk) {
-        throw createDesktopBridgeUnavailableError("保存文件");
+        throw createDesktopBridgeUnavailableError("Saving a file");
       }
 
       await window.novayxk.saveFile(selectedFile.path, selectedFile.content);
       setIsEditorDirty(false);
-      setStatus(`已保存 ${selectedFile.path}`);
+      setStatus(`Saved ${selectedFile.path}`);
       const nextProject = await window.novayxk.refreshProject();
       setProject(nextProject);
       return true;
     } catch (error) {
-      setStatus(formatActionableError(error, "保存文件失败"));
+      setStatus(formatActionableError(error, "Failed to save the file"));
       return false;
     }
   }, [isEditorDirty, project, selectedFile, setStatus]);
@@ -218,7 +218,7 @@ export function useProjectWorkspace({
               setActiveTreePath(null);
               setActiveTreeNodeType(null);
             }
-            setStatus(`文件已不存在，已刷新工作区：${candidatePath}`);
+            setStatus(`The file no longer exists. Workspace refreshed: ${candidatePath}`);
             return;
           }
         }
@@ -249,9 +249,9 @@ export function useProjectWorkspace({
               }
             : current,
         );
-        setStatus(`已加载目录：${directoryPath || shortPath(project.root)}`);
+        setStatus(`Directory loaded: ${directoryPath || shortPath(project.root)}`);
       } catch (error) {
-        setStatus(formatActionableError(error, "加载目录失败"));
+        setStatus(formatActionableError(error, "Failed to load the directory"));
       } finally {
         setLoadingDirectories((current) => {
           const next = new Set(current);
@@ -283,7 +283,7 @@ export function useProjectWorkspace({
         const placeholder: ProjectTextFile = {
           kind: "text",
           path: node.path,
-          content: "打开真实项目后，这里会显示文件内容。",
+          content: "Open a real project to show file contents here.",
         };
         setSelectedFile(placeholder);
         return;
@@ -294,7 +294,7 @@ export function useProjectWorkspace({
         if (!saved) return;
       }
 
-      setStatus(`正在读取 ${node.path}`);
+      setStatus(`Reading ${node.path}`);
       try {
         const file = await loadProjectSelectedFile(node.path);
         if (file) {
@@ -303,10 +303,10 @@ export function useProjectWorkspace({
           setActiveTreeNodeType("file");
           revealTreePath(file.path);
           setIsEditorDirty(false);
-          setStatus(file.kind === "image" ? `已打开图片：${file.path}` : `已读取 ${file.path}`);
+          setStatus(file.kind === "image" ? `Image opened: ${file.path}` : `Read ${file.path}`);
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "读取文件失败";
+        const message = error instanceof Error ? error.message : "Failed to read the file";
         if (message.includes("ENOENT")) {
           try {
             await syncProjectView({ preferredPath: null });
@@ -321,10 +321,10 @@ export function useProjectWorkspace({
             setActiveTreePath(null);
             setActiveTreeNodeType(null);
           }
-          setStatus(`文件不存在，工作区已刷新：${node.path}`);
+          setStatus(`The file does not exist. Workspace refreshed: ${node.path}`);
           return;
         }
-        setStatus(formatActionableError(error, "读取文件失败"));
+        setStatus(formatActionableError(error, "Failed to read the file"));
       }
     },
     [activeTreePath, expandedPaths, isEditorDirty, loadTreeDirectory, project, revealTreePath, saveSelectedFile, selectedFile, setStatus, syncProjectView],
@@ -332,31 +332,31 @@ export function useProjectWorkspace({
 
   const refreshTree = React.useCallback(async () => {
     if (!window.novayxk) {
-      setStatus(getDesktopBridgeUnavailableMessage("刷新工作区"));
+      setStatus(getDesktopBridgeUnavailableMessage("Refreshing the workspace"));
       return;
     }
 
     try {
-      setStatus("正在刷新工作区...");
+      setStatus("Refreshing the workspace...");
       if (project) {
         await syncProjectView();
-        setStatus(`已刷新工作区：${shortPath(project.root)}`);
+        setStatus(`Workspace refreshed: ${shortPath(project.root)}`);
       } else {
-        setStatus("当前没有打开项目。");
+        setStatus("No project is currently open.");
       }
     } catch (error) {
-      setStatus(formatActionableError(error, "刷新工作区失败"));
+      setStatus(formatActionableError(error, "Failed to refresh the workspace"));
     }
   }, [project, setStatus, syncProjectView]);
 
   const expandAllTreeFolders = React.useCallback(() => {
     setExpandedPaths(new Set(collectDirectoryPaths(fileTree)));
-    setStatus("已展开已加载的目录；未加载目录会在点击时读取。");
+    setStatus("Expanded all loaded folders. Unloaded folders will be read when clicked.");
   }, [fileTree, setStatus]);
 
   const collapseAllTreeFolders = React.useCallback(() => {
     setExpandedPaths(new Set());
-    setStatus("已收起全部目录");
+    setStatus("Collapsed all folders");
   }, [setStatus]);
 
   const getPreferredTreeDirectory = React.useCallback(() => {
@@ -372,7 +372,7 @@ export function useProjectWorkspace({
   const createTreeEntry = React.useCallback(
     async (kind: "file" | "directory") => {
       if (!project) {
-        setStatus("请先打开一个项目。");
+        setStatus("Open a project first.");
         return;
       }
 
@@ -382,7 +382,7 @@ export function useProjectWorkspace({
           ? joinRelativePath(baseDir, "new-file.txt")
           : joinRelativePath(baseDir, "new-folder");
       setCreateEntryDialog({ kind, path: defaultPath });
-      setStatus(kind === "file" ? "请输入新文件路径" : "请输入新文件夹路径");
+      setStatus(kind === "file" ? "Enter the new file path" : "Enter the new folder path");
     },
     [getPreferredTreeDirectory, project, setStatus],
   );
@@ -390,13 +390,13 @@ export function useProjectWorkspace({
   const submitCreateTreeEntry = React.useCallback(async () => {
     if (!createEntryDialog) return;
     if (!window.novayxk) {
-      setStatus(getDesktopBridgeUnavailableMessage("新建文件或文件夹"));
+      setStatus(getDesktopBridgeUnavailableMessage("Creating a file or folder"));
       return;
     }
 
     const targetPath = normalizeRelativePath(createEntryDialog.path);
     if (!targetPath) {
-      setStatus(createEntryDialog.kind === "file" ? "请输入新文件路径。" : "请输入新文件夹路径。");
+      setStatus(createEntryDialog.kind === "file" ? "Enter the new file path." : "Enter the new folder path.");
       return;
     }
 
@@ -405,7 +405,7 @@ export function useProjectWorkspace({
         await window.novayxk.applyFileOps([{ type: "write", path: targetPath, content: "" }]);
         await syncProjectView({ preferredPath: targetPath });
         setCreateEntryDialog(null);
-        setStatus(`已新建文件：${targetPath}`);
+        setStatus(`Created file: ${targetPath}`);
       } else {
         await window.novayxk.applyFileOps([{ type: "mkdir", path: targetPath }]);
         revealTreePath(targetPath);
@@ -413,10 +413,10 @@ export function useProjectWorkspace({
         setActiveTreePath(targetPath);
         setActiveTreeNodeType("directory");
         setCreateEntryDialog(null);
-        setStatus(`已新建文件夹：${targetPath}`);
+        setStatus(`Created folder: ${targetPath}`);
       }
     } catch (error) {
-      setStatus(formatActionableError(error, `新建${createEntryDialog.kind === "file" ? "文件" : "文件夹"}失败`));
+      setStatus(formatActionableError(error, `Failed to create the ${createEntryDialog.kind === "file" ? "file" : "folder"}`));
     }
   }, [createEntryDialog, revealTreePath, setStatus, syncProjectView]);
 

@@ -47,7 +47,7 @@ describe("provider readiness helpers", () => {
     expect(isLikelyImageModel("gpt-4.1-mini")).toBe(false);
     expect(inferProviderApiMode("gpt-image-1")).toBe("imageGenerations");
     expect(inferProviderApiMode("gpt-4.1-mini")).toBe("chatCompletions");
-    expect(getProviderModeLabel("imageGenerations")).toBe("图片生成");
+    expect(getProviderModeLabel("imageGenerations")).toBe("Image generation");
   });
 
   it("recognizes assistant token modes", () => {

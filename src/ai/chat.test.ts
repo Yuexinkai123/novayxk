@@ -117,11 +117,11 @@ describe("AI chat parsing guards", () => {
     const lowPrompt = buildSystemPrompt("", "", runtimePermission, "low");
     const standardPrompt = buildSystemPrompt("", "", runtimePermission, "standard");
 
-    expect(lowPrompt).toContain("低 token 不等于低质量");
-    expect(lowPrompt).toContain("目标仍然是解决问题");
-    expect(lowPrompt).toContain("主动用最小必要检查补齐");
-    expect(standardPrompt).toContain("目标仍然是完整解决用户问题");
-    expect(standardPrompt).toContain("先补最相关的信息");
+    expect(lowPrompt).toContain("Lower token usage does not mean lower quality");
+    expect(lowPrompt).toContain("the goal is still to solve the problem");
+    expect(lowPrompt).toContain("gather the single most important missing context");
+    expect(standardPrompt).toContain("fully solving the user's problem");
+    expect(standardPrompt).toContain("fill the most relevant gap first");
   });
 
   it("keeps image attachments in saved history but strips them from model context", () => {
@@ -198,7 +198,7 @@ describe("AI chat parsing guards", () => {
       { type: "delete", path: "dist" },
     ]);
     expect(hasDestructiveFileOps(operations)).toBe(true);
-    expect(getFileOpsParseIssue('```fileops\n[{"type":"write","path":"a.md"}]\n```')).toContain("JSON 不是合法");
+    expect(getFileOpsParseIssue('```fileops\n[{"type":"write","path":"a.md"}]\n```')).toContain("not a valid fileops payload");
   });
 
   it("extracts bare fileops json without fences", () => {
@@ -222,7 +222,7 @@ describe("AI chat parsing guards", () => {
   });
 
   it("reports malformed bare fileops json", () => {
-    expect(getFileOpsParseIssue('[{"type":"write","path":"a.md","content":"hi"}')).toContain("疑似裸 JSON fileops");
+    expect(getFileOpsParseIssue('[{"type":"write","path":"a.md","content":"hi"}')).toContain("bare JSON fileops");
   });
 
   it("detects invalid automation blocks that need model-side recovery", () => {
@@ -230,19 +230,19 @@ describe("AI chat parsing guards", () => {
       getAutomationRecoveryIssue(
         '```fileops\n{"operation":"create","path":"C:\\\\Users\\\\29794\\\\Desktop\\\\login-page.html","content":"<html></html>"}\n```',
       ),
-    ).toContain("旧版或伪 fileops");
+    ).toContain("legacy or pseudo fileops");
 
     expect(
       getAutomationRecoveryIssue(
         '```fileops\n[{"type":"write","path":"C:\\\\Users\\\\29794\\\\Desktop\\\\login-page.html","content":"<html></html>"}]\n```',
       ),
-    ).toContain("绝对路径或项目外路径");
+    ).toContain("absolute path or a path outside the project");
 
     expect(
       getAutomationRecoveryIssue(
         '[{"type":"write","path":"C:\\\\Users\\\\29794\\\\Desktop\\\\login-page.html","content":"<html></html>"}]',
       ),
-    ).toContain("绝对路径或项目外路径");
+    ).toContain("absolute path or a path outside the project");
   });
 
   it("extracts valid browser-actions and reports malformed blocks", () => {
@@ -260,7 +260,7 @@ describe("AI chat parsing guards", () => {
       { type: "select", selector: "select[name=city]", value: "shanghai" },
       { type: "extractText", selector: ".result", multiple: true },
     ]);
-    expect(getBrowserActionsParseIssue('```browser-actions\n[{"type":"click"}]\n```')).toContain("JSON 不是合法");
+    expect(getBrowserActionsParseIssue('```browser-actions\n[{"type":"click"}]\n```')).toContain("not a valid browser-actions payload");
   });
 
   it("accepts legacy browser action payloads with actions/action keys", () => {
@@ -314,7 +314,7 @@ describe("AI chat parsing guards", () => {
     expect(getUserIntentProfile("卸载了吧把它").kind).toBe("execute");
     expect(getUserIntentProfile("查看一下我的电脑有uu加速器吗").autoExecutePowerShell).toBe(true);
     expect(getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下").needsLightPlan).toBe(true);
-    expect(buildUserIntentInstruction(getUserIntentProfile("什么是 WSL"))).toContain("解释问答");
+    expect(buildUserIntentInstruction(getUserIntentProfile("什么是 WSL"))).toContain("Task type");
   });
 
   it("recognizes local machine inspection tasks that should auto-check", () => {
@@ -347,11 +347,11 @@ describe("AI chat parsing guards", () => {
       },
     ]);
 
-    expect(note).toContain("不能直接下");
-    expect(note).toContain("编码乱码");
-    expect(note).toContain("还在终端任务里继续运行");
-    expect(note).toContain("没有任何可见输出");
-    expect(note).toContain("不能说“跑通了”");
+    expect(note).toContain("execution is not finished yet");
+    expect(note).toContain("encoding corruption");
+    expect(note).toContain("still running");
+    expect(note).toContain("no visible output");
+    expect(note).toContain("do not claim it ran successfully");
     expect(note).toContain("high risk");
   });
 
@@ -364,14 +364,15 @@ describe("AI chat parsing guards", () => {
       },
     ]);
 
-    expect(note).toContain("退出码不是 0");
-    expect(note).toContain("不能把后续猜测说成成功");
-    expect(note).toContain("严禁把脚本报错归因成");
+    expect(note).toContain("non-zero exit code");
+    expect(note).toContain("must not describe later guesses as success");
+    expect(note).toContain("Do not blame");
   });
 
   it("detects action replies that stop at a half sentence", () => {
     const inspectProfile = getUserIntentProfile("查看一下我的电脑有uu加速器吗");
     const executeProfile = getUserIntentProfile("帮我卸载丁丁");
+    const projectInspectProfile = getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下");
 
     expect(isLikelyIncompleteAssistantReply("帮你查一下电脑里有没有安装 UU 加速器（网易 UU）：", inspectProfile)).toBe(true);
     expect(
@@ -383,19 +384,37 @@ describe("AI chat parsing guards", () => {
     expect(
       isLikelyIncompleteAssistantReply(
         "我先快速扫一眼主要代码文件的内容，再给你总结。",
-        getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下"),
+        projectInspectProfile,
+      ),
+    ).toBe(true);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "Let me quickly scan the main project files, then I'll summarize it for you.",
+        projectInspectProfile,
       ),
     ).toBe(true);
     expect(
       isLikelyIncompleteAssistantReply(
         "计划如下：1. 先看项目结构 2. 再读核心文件 3. 最后总结模块关系",
-        getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下"),
+        projectInspectProfile,
+      ),
+    ).toBe(true);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "Here's the plan: 1. inspect the project structure 2. read the core files 3. summarize the module layout",
+        projectInspectProfile,
       ),
     ).toBe(true);
     expect(
       isLikelyIncompleteAssistantReply(
         "计划如下：1. 先看项目结构 2. 再读核心文件 3. 最后总结模块关系。先给你结论：这是一个 Electron + React 的桌面项目，主线分成界面层、桌面桥接层和本地执行层。",
-        getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下"),
+        projectInspectProfile,
+      ),
+    ).toBe(false);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "Here's the plan: 1. inspect the project structure 2. read the core files 3. summarize the module layout. Here's the conclusion first: this is an Electron + React desktop project split across the UI layer, the desktop bridge, and the local execution layer.",
+        projectInspectProfile,
       ),
     ).toBe(false);
     expect(

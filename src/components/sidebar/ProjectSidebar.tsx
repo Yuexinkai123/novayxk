@@ -11,12 +11,14 @@ import {
   Search,
   X,
 } from "lucide-react";
-import type { FileNode } from "../../vite-env";
+import type { AppLanguage, FileNode } from "../../vite-env";
 import { shortPath } from "../../project/tree";
+import { getLocaleStrings } from "../../app/i18n";
 import { TreeNode } from "../TreeNode";
 
 type ProjectSidebarProps = {
   isCollapsed: boolean;
+  language: AppLanguage;
   projectRoot: string | null;
   treeFilter: string;
   filteredFileTree: FileNode[];
@@ -37,6 +39,7 @@ type ProjectSidebarProps = {
 
 export function ProjectSidebar({
   isCollapsed,
+  language,
   projectRoot,
   treeFilter,
   filteredFileTree,
@@ -55,15 +58,16 @@ export function ProjectSidebar({
   onSelectFile,
 }: ProjectSidebarProps) {
   const hasProject = Boolean(projectRoot);
+  const strings = getLocaleStrings(language).sidebar;
 
   return (
     <aside className="sidebar" aria-hidden={isCollapsed}>
       <div className="panel-heading">
         <div>
-          <span>项目</span>
-          <strong>{projectRoot ? shortPath(projectRoot) : "演示结构"}</strong>
+          <span>{strings.project}</span>
+          <strong>{projectRoot ? shortPath(projectRoot) : strings.demoStructure}</strong>
         </div>
-        <button className="panel-collapse-button" onClick={onCollapse} title="隐藏项目栏">
+        <button className="panel-collapse-button" onClick={onCollapse} title={strings.hidePanel}>
           <ChevronsLeft size={15} />
         </button>
       </div>
@@ -73,40 +77,40 @@ export function ProjectSidebar({
           <input
             value={treeFilter}
             onChange={(event) => onTreeFilterChange(event.target.value)}
-            placeholder="搜索文件和目录"
-            aria-label="搜索文件和目录"
+            placeholder={strings.searchPlaceholder}
+            aria-label={strings.searchLabel}
           />
           {treeFilter ? (
-            <button className="tree-toolbar-button" onClick={onClearTreeFilter} title="清空搜索">
+            <button className="tree-toolbar-button" onClick={onClearTreeFilter} title={strings.clearSearch}>
               <X size={13} />
             </button>
           ) : null}
         </div>
         <div className="tree-toolbar-actions">
-          <button className="tree-toolbar-button" onClick={onRefreshTree} disabled={!hasProject} title="刷新文件树">
+          <button className="tree-toolbar-button" onClick={onRefreshTree} disabled={!hasProject} title={strings.refreshTree}>
             <RefreshCw size={14} />
           </button>
-          <button className="tree-toolbar-button" onClick={onExpandAll} disabled={!hasProject} title="展开全部">
+          <button className="tree-toolbar-button" onClick={onExpandAll} disabled={!hasProject} title={strings.expandAll}>
             <ChevronsDown size={14} />
           </button>
-          <button className="tree-toolbar-button" onClick={onCollapseAll} disabled={!hasProject} title="收起全部">
+          <button className="tree-toolbar-button" onClick={onCollapseAll} disabled={!hasProject} title={strings.collapseAll}>
             <ChevronsUp size={14} />
           </button>
         </div>
       </div>
       <div className="tree-action-row">
-        <button className="tree-action-button" onClick={() => onCreateEntry("file")} disabled={!hasProject} title="在当前目录新建文件">
+        <button className="tree-action-button" onClick={() => onCreateEntry("file")} disabled={!hasProject} title={strings.newFileTitle}>
           <FilePlus2 size={14} />
-          新建文件
+          {strings.newFile}
         </button>
         <button
           className="tree-action-button"
           onClick={() => onCreateEntry("directory")}
           disabled={!hasProject}
-          title="在当前目录新建文件夹"
+          title={strings.newFolderTitle}
         >
           <FolderPlus size={14} />
-          新建文件夹
+          {strings.newFolder}
         </button>
       </div>
       <div className="tree-list">
@@ -116,7 +120,7 @@ export function ProjectSidebar({
               {hasTreeFilter && (
                 <div className="tree-search-status">
                   <FileSearch size={13} />
-                  {isSearchingTree ? "正在搜索项目文件..." : `项目搜索结果 ${filteredFileTree.length} 项`}
+                  {isSearchingTree ? strings.searching : `${filteredFileTree.length} ${strings.projectMatches}`}
                 </div>
               )}
               {filteredFileTree.map((node) => (
@@ -129,21 +133,22 @@ export function ProjectSidebar({
                   onSelect={onSelectFile}
                   forceExpanded={hasTreeFilter}
                   loadingPaths={loadingDirectories}
+                  language={language}
                 />
               ))}
             </>
           ) : (
             <div className="tree-empty compact">
               <Search size={24} />
-              <strong>没有匹配结果</strong>
-              <span>换个关键词试试，或者清空当前过滤。</span>
+              <strong>{strings.noMatchesTitle}</strong>
+              <span>{strings.noMatchesBody}</span>
             </div>
           )
         ) : (
           <div className="tree-empty">
             <FolderOpen size={26} />
-            <strong>尚未打开项目</strong>
-            <span>选择一个代码目录后，这里会显示真实文件树。</span>
+            <strong>{strings.noProjectTitle}</strong>
+            <span>{strings.noProjectBody}</span>
           </div>
         )}
       </div>

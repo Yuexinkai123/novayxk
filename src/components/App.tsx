@@ -48,15 +48,10 @@ import { useWorkspaceActions } from "../hooks/useWorkspaceActions";
 import { useBrowserWorkspace } from "../hooks/useBrowserWorkspace";
 import { hasAnyConfiguredProvider } from "../ai/providers";
 import {
-  getAssistantModeStatus,
-  getExecutionModeLabel,
-  getExecutionModeTitle,
-  getPrivilegeChipLabel,
-  getWorkspaceStatusLabel,
   PRODUCT_NAME,
-  PRODUCT_TAGLINE,
 } from "../app/product";
-import { getGuidePromptStatus, getWorkspaceGuideKind } from "../app/workspaceGuide";
+import { getWorkspaceGuideKind } from "../app/workspaceGuide";
+import { getLocaleStrings, normalizeAppLanguage } from "../app/i18n";
 import {
   normalizeRelativePath,
   shortPath,
@@ -69,6 +64,7 @@ const isBrowserWorkspaceWindow = new URLSearchParams(window.location.search).get
 
 function App() {
   const initialConfig = window.novayxk?.initialConfig ?? {};
+  const initialLanguage = normalizeAppLanguage(initialConfig.language);
   const [messages, setMessages] = React.useState<ChatMessage[]>(emptyMessages);
   const [prompt, setPrompt] = React.useState("");
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
@@ -79,7 +75,7 @@ function App() {
   const [isStopping, setIsStopping] = React.useState(false);
   const [loadingStartedAt, setLoadingStartedAt] = React.useState<number | null>(null);
   const [loadingElapsedMs, setLoadingElapsedMs] = React.useState(0);
-  const [status, setStatus] = React.useState("打开一个项目，开始和 Novayxk 协作。");
+  const [status, setStatus] = React.useState<string>(getLocaleStrings(initialLanguage).app.statusOpenProjectToStart);
   const [assistantPromptFocusNonce, setAssistantPromptFocusNonce] = React.useState(0);
   const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
   const [editorFind, setEditorFind] = React.useState("");
@@ -110,6 +106,7 @@ function App() {
     assistantMode,
     privilege,
     isRestartingAsAdmin,
+    language,
     theme,
     browserShowAdvancedControls,
     activeProvider,
@@ -121,6 +118,7 @@ function App() {
     saveProviders,
     savePendingAdminResume,
     switchActiveProvider,
+    updateLanguage,
     updateTheme,
     updateAiControlMode,
     updateAssistantMode,
@@ -138,6 +136,16 @@ function App() {
     initialConfig,
     setStatus,
   });
+  const locale = React.useMemo(() => getLocaleStrings(language), [language]);
+  const appStrings = locale.app;
+  const getLocalizedAssistantModeStatus = React.useCallback(
+    (nextMode: AssistantMode) => {
+      if (nextMode === "low") return appStrings.switchedToLowMode;
+      if (nextMode === "deep") return appStrings.switchedToDeepMode;
+      return appStrings.switchedToStandardMode;
+    },
+    [appStrings],
+  );
   const persistWorkspaceLayout = React.useCallback(
     (workspaceLayout: NonNullable<typeof initialConfig.workspaceLayout>) => {
       void saveAppConfig({ workspaceLayout }).catch(() => {
@@ -167,16 +175,16 @@ function App() {
     () => ({
       controlMode: aiControlMode,
       isAdmin: privilege?.isAdmin === true,
-      privilegeLabel: privilege?.isAdmin ? "Windows 管理员权限" : privilege ? "Windows 普通权限" : "未知权限",
+      privilegeLabel: privilege?.isAdmin ? "Windows administrator privilege" : privilege ? "Windows standard privilege" : "Unknown privilege",
     }),
     [aiControlMode, privilege],
   );
   const switchAssistantMode = React.useCallback(
     async (nextMode: AssistantMode) => {
       const saved = await updateAssistantMode(nextMode);
-      setStatus(saved ? getAssistantModeStatus(nextMode) : "助手模式已切换，但保存偏好失败");
+      setStatus(saved ? getLocalizedAssistantModeStatus(nextMode) : appStrings.assistantModeSaveFailed);
     },
-    [setStatus, updateAssistantMode],
+    [appStrings.assistantModeSaveFailed, getLocalizedAssistantModeStatus, setStatus, updateAssistantMode],
   );
   const hasConfiguredProvider = React.useMemo(() => hasAnyConfiguredProvider(providers), [providers]);
 
@@ -270,6 +278,10 @@ function App() {
   React.useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  React.useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   React.useEffect(() => {
     if (hasSeenWelcome) {
@@ -404,24 +416,24 @@ function App() {
     source: "manual" | "ai",
   ): Promise<AdminRequestState> => {
     if (!inspection.requiresAdmin || privilege?.isAdmin || !privilege?.canElevate) return "ready";
-    const confirmed = await confirmAdminRequest(command, inspection.adminReason ?? "该命令可能需要管理员权限", source);
+    const confirmed = await confirmAdminRequest(command, inspection.adminReason ?? appStrings.commandMayRequireAdmin, source);
     if (!confirmed) {
-      setStatus("已取消管理员模式切换。");
+      setStatus(appStrings.adminSwitchCancelled);
       return "cancelled";
     }
     try {
       const started = await restartAsAdmin();
       return started ? "restarting" : "cancelled";
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "管理员授权请求失败");
+      setStatus(error instanceof Error ? error.message : appStrings.adminAuthorizationFailed);
       return "cancelled";
     }
   };
 
   const handleTerminalTaskNeedsInput = React.useCallback((task: TerminalTask) => {
     setIsBottomCollapsed(false);
-    setStatus(`终端任务等待输入：${task.title}`);
-  }, []);
+    setStatus(`${appStrings.terminalTaskWaitingForInput}: ${task.title}`);
+  }, [appStrings.terminalTaskWaitingForInput]);
 
   const {
     terminalTasks,
@@ -622,11 +634,11 @@ function App() {
   const openBrowserWorkspaceWindow = React.useCallback(async () => {
     try {
       await window.novayxk?.openBrowserWorkspaceWindow();
-      setStatus("已打开浏览器工作区窗口");
+      setStatus(appStrings.openedBrowserWorkspaceWindow);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "打开浏览器工作区窗口失败");
+      setStatus(error instanceof Error ? error.message : appStrings.failedToOpenBrowserWorkspaceWindow);
     }
-  }, []);
+  }, [appStrings.failedToOpenBrowserWorkspaceWindow, appStrings.openedBrowserWorkspaceWindow]);
 
   React.useEffect(() => {
     if (!pendingAdminResume) {
@@ -666,10 +678,11 @@ function App() {
           <div className="center-panel-tabs browser-window-tabs">
             <button className="active">
               <Folder size={15} />
-              浏览器工作区
+              {appStrings.browserWorkspace}
             </button>
           </div>
           <BrowserWorkspace
+            language={language}
             webviewRef={webviewRef}
             browserUrlInput={browserUrlInput}
             browserSnapshot={browserSnapshot}
@@ -703,7 +716,7 @@ function App() {
                 action: "runScript",
                 preview,
               });
-              setStatus(ok ? `页面脚本执行完成：${preview}` : `页面脚本执行失败：${preview}`);
+              setStatus(ok ? `${appStrings.pageScriptCompleted}: ${preview}` : `${appStrings.pageScriptFailed}: ${preview}`);
             }}
             onRunBrowserAutomation={runBrowserAutomation}
             onClearBrowserLogs={() => {
@@ -727,12 +740,12 @@ function App() {
             </div>
             <div>
               <h1>{PRODUCT_NAME}</h1>
-              <p>{PRODUCT_TAGLINE}</p>
+              <p>{appStrings.productTagline}</p>
             </div>
           </div>
           <div className="topbar-project-state">
-            <span>当前工作区</span>
-            <strong>{project ? shortPath(project.root) : "未打开项目"}</strong>
+            <span>{appStrings.currentWorkspace}</span>
+            <strong>{project ? shortPath(project.root) : appStrings.noProjectOpened}</strong>
           </div>
         </div>
 
@@ -740,30 +753,30 @@ function App() {
           <div className="top-actions-meta">
             <div className={`privilege-chip ${privilege?.isAdmin ? "admin" : "standard"}`}>
               {privilege?.isAdmin ? <ShieldCheck size={15} /> : <LockKeyhole size={15} />}
-              {getPrivilegeChipLabel(privilege?.isAdmin)}
+              {privilege?.isAdmin ? appStrings.privilegeAdmin : appStrings.privilegeStandard}
             </div>
             <div className={`control-mode ${aiControlMode === "full" ? "full" : "safe"}`}>
               <button
                 className={aiControlMode === "safe" ? "active" : ""}
                 onClick={() => void updateAiControlMode("safe")}
-                title={getExecutionModeTitle("safe")}
+                title={appStrings.executionProjectTitle}
               >
                 <LockKeyhole size={15} />
-                {getExecutionModeLabel("safe")}
+                {appStrings.executionProject}
               </button>
               <button
                 className={aiControlMode === "full" ? "active" : ""}
                 onClick={() => void updateAiControlMode("full")}
-                title={getExecutionModeTitle("full")}
+                title={appStrings.executionSystemTitle}
               >
                 <UnlockKeyhole size={15} />
-                {getExecutionModeLabel("full")}
+                {appStrings.executionSystem}
               </button>
             </div>
             <button
               className="theme-toggle"
               onClick={() => void updateTheme(theme === "dark" ? "light" : "dark")}
-              title={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
+              title={theme === "dark" ? appStrings.switchToLightMode : appStrings.switchToDarkMode}
             >
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
@@ -773,11 +786,11 @@ function App() {
               className="model-select"
               value={activeProviderId}
               onChange={(event) => void switchActiveProvider(event.target.value)}
-              aria-label="选择模型供应商"
+              aria-label={appStrings.chooseModelProvider}
             >
               {providers.map((provider) => (
                 <option key={provider.id} value={provider.id}>
-                  {provider.name} / {provider.model || "未选择模型"}
+                  {provider.name} / {provider.model || appStrings.noModelSelected}
                 </option>
               ))}
             </select>
@@ -789,11 +802,11 @@ function App() {
               }}
             >
               <Settings size={17} />
-              设置
+              {appStrings.settings}
             </button>
             <button className="primary-button" onClick={openProject}>
               <FolderOpen size={17} />
-              打开项目
+              {appStrings.openProject}
             </button>
           </div>
         </div>
@@ -804,12 +817,12 @@ function App() {
         style={workspaceStyle}
       >
         {isLeftCollapsed && (
-          <button className="restore-panel restore-left" onClick={() => setIsLeftCollapsed(false)} title="显示项目栏">
+          <button className="restore-panel restore-left" onClick={() => setIsLeftCollapsed(false)} title={appStrings.showProjectPanel}>
             <ChevronsRight size={15} />
           </button>
         )}
         {isRightCollapsed && (
-          <button className="restore-panel restore-right" onClick={() => setIsRightCollapsed(false)} title="显示助手栏">
+          <button className="restore-panel restore-right" onClick={() => setIsRightCollapsed(false)} title={appStrings.showAssistantPanel}>
             <ChevronsLeft size={15} />
           </button>
         )}
@@ -817,6 +830,7 @@ function App() {
         {isSidebarVisible && (
           <ProjectSidebar
             isCollapsed={false}
+            language={language}
             projectRoot={project?.root ?? null}
             treeFilter={treeFilter}
             filteredFileTree={filteredFileTree}
@@ -841,13 +855,14 @@ function App() {
             className="resize-handle vertical left-handle"
             onPointerDown={(event) => startPanelResize(event, "left")}
             role="separator"
-            aria-label="调整项目栏宽度"
+            aria-label={appStrings.resizeProjectPanel}
           />
         )}
 
         {isCenterVisible && (
           <section className={`editor-area ${isBottomCollapsed ? "bottom-collapsed" : ""}`} style={editorStyle}>
             <EditorPane
+              language={language}
               selectedFile={selectedFile}
               isEditorDirty={isEditorDirty}
               stats={selectedFileStats}
@@ -872,7 +887,7 @@ function App() {
                 setIsRightCollapsed(false);
                 setPrompt(nextPrompt);
                 setAssistantPromptFocusNonce((value) => value + 1);
-                setStatus(getGuidePromptStatus());
+                setStatus(appStrings.starterPromptInserted);
               }}
               onSelectedFileContentChange={(content) => {
                 if (!selectedTextFile) return;
@@ -890,12 +905,13 @@ function App() {
                 className="resize-handle horizontal bottom-handle"
                 onPointerDown={(event) => startPanelResize(event, "bottom")}
                 role="separator"
-                aria-label="调整底部工具区高度"
+                aria-label={appStrings.resizeBottomTools}
               />
             )}
 
             <div className="bottom-grid" aria-hidden={isBottomCollapsed}>
               <TerminalPanel
+                language={language}
                 canUndoPatch={canUndoPatch}
                 isLoading={isLoading}
                 hasPatchPreview={Boolean(patchPreview)}
@@ -921,13 +937,14 @@ function App() {
             className="resize-handle vertical right-handle"
             onPointerDown={(event) => startPanelResize(event, "right")}
             role="separator"
-            aria-label="调整助手栏宽度"
+            aria-label={appStrings.resizeAssistantPanel}
           />
         )}
 
         <AssistantPanel
           isCollapsed={isRightCollapsed}
-          model={activeProvider.model || "未选择模型"}
+          model={activeProvider.model || appStrings.noModelSelected}
+          language={language}
           assistantMode={assistantMode}
           hasProject={Boolean(project)}
           isModelReady={hasConfiguredProvider}
@@ -970,18 +987,19 @@ function App() {
             setPrompt(targetMessage.content);
             setEditingMessageIndex(index);
             setAssistantPromptFocusNonce((value) => value + 1);
-            setStatus("已回填上一条问题，重新发送后会覆盖原回答。");
+            setStatus(appStrings.previousPromptRestored);
           }}
         />
       </section>
 
       <footer className="statusbar">
         <span>{status}</span>
-        <span>{getWorkspaceStatusLabel(Boolean(project))}</span>
+        <span>{project ? appStrings.workspaceConnected : appStrings.workspacePreview}</span>
       </footer>
 
       {isSettingsOpen && (
         <SettingsModal
+          language={language}
           providers={providers}
           activeProviderId={activeProviderId}
           editingProvider={editingProvider}
@@ -1004,6 +1022,9 @@ function App() {
           onToggleBrowserShowAdvancedControls={(value) => {
             void updateBrowserShowAdvancedControls(value);
           }}
+          onLanguageChange={(nextLanguage) => {
+            void updateLanguage(nextLanguage);
+          }}
           onRestartAsAdmin={() => {
             void restartAsAdmin();
           }}
@@ -1016,7 +1037,8 @@ function App() {
 
       {isMemoryOpen && (
         <MemoryModal
-          projectLabel={project ? shortPath(project.root) : "尚未打开项目"}
+          language={language}
+          projectLabel={project ? shortPath(project.root) : appStrings.noProjectOpened}
           memoryDraft={projectMemoryDraft}
           canSave={Boolean(project)}
           onMemoryDraftChange={setProjectMemoryDraft}
@@ -1027,8 +1049,9 @@ function App() {
 
       {createEntryDialog && (
         <CreateEntryDialog
+          language={language}
           dialog={createEntryDialog}
-          projectLabel={project ? shortPath(project.root) : "尚未打开项目"}
+          projectLabel={project ? shortPath(project.root) : appStrings.noProjectOpened}
           canSubmit={Boolean(normalizeRelativePath(createEntryDialog.path))}
           onPathChange={(path) => setCreateEntryDialog({ ...createEntryDialog, path })}
           onCancel={() => setCreateEntryDialog(null)}
@@ -1038,6 +1061,7 @@ function App() {
 
       {confirmDialog && (
         <ConfirmDialog
+          language={language}
           dialog={confirmDialog}
           onCancel={() => {
             if (confirmDialog.type === "system-action" || confirmDialog.type === "admin-request") {
@@ -1063,6 +1087,7 @@ function App() {
 
       {isWelcomeOpen && !project && messages.length === 0 && (
         <WelcomeGuide
+          language={language}
           onDismiss={() => {
             void dismissWelcomeGuide();
           }}

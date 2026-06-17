@@ -67,28 +67,28 @@ export function inspectSensitiveGeneratedContent(content: string): SensitiveCont
   if (SENSITIVE_CAPTURE_PATTERN.test(content)) {
     return {
       blocked: true,
-      reason: "包含读取 Cookie/localStorage/sessionStorage 或 monkey patch fetch/XHR 的凭据抓取逻辑",
+      reason: "Contains credential-capture logic that reads Cookie/localStorage/sessionStorage or monkey-patches fetch/XHR",
     };
   }
 
   if (CONCRETE_BEARER_PATTERN.test(content)) {
     return {
       blocked: true,
-      reason: "包含疑似真实 Bearer Authorization 值",
+      reason: "Contains what looks like a real Bearer Authorization value",
     };
   }
 
   if (CONCRETE_API_KEY_PATTERN.test(content)) {
     return {
       blocked: true,
-      reason: "包含疑似真实 Token/API Key 值",
+      reason: "Contains what looks like a real Token or API key",
     };
   }
 
   if (hasConcreteSensitiveAssignment(content)) {
     return {
       blocked: true,
-      reason: "包含疑似真实账号密码、Token、Cookie、Session 或密钥字面量",
+      reason: "Contains what looks like a real account password, token, cookie, session, or secret literal",
     };
   }
 

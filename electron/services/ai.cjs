@@ -29,10 +29,10 @@ function createOptionalAbortTimeout(controller, timeoutMs) {
 
 async function requestChatCompletion(provider, messages, options = {}) {
   if (!provider?.baseUrl || !provider?.apiKey || !provider?.model) {
-    throw new Error("供应商配置不完整。");
+    throw new Error("Provider configuration is incomplete.");
   }
   if (provider.apiMode === "imageGenerations") {
-    throw new Error("当前供应商配置为图片生成接口，请使用图片生成请求。");
+    throw new Error("The current provider is configured for image generation. Please use an image generation request instead.");
   }
 
   const startedAt = Date.now();
@@ -74,7 +74,7 @@ async function requestChatCompletion(provider, messages, options = {}) {
         elapsedMs: Date.now() - startedAt,
         responsePreview: responseText.slice(0, 500),
       }, "warn");
-      throw new Error(`模型请求失败：${response.status} ${formatProviderError(responseText, endpoint)}`);
+      throw new Error(`Model request failed: ${response.status} ${formatProviderError(responseText, endpoint)}`);
     }
 
     try {
@@ -96,7 +96,7 @@ async function requestChatCompletion(provider, messages, options = {}) {
         elapsedMs: Date.now() - startedAt,
         responsePreview: responseText.slice(0, 500),
       }, "error");
-      throw new Error(`供应商返回的不是 JSON。请检查接口类型和 Base URL。当前请求：${endpoint}`);
+      throw new Error(`The provider did not return JSON. Check the API type and Base URL. Current request: ${endpoint}`);
     }
   } catch (error) {
     logError("ai:request:error", error, {
@@ -107,7 +107,7 @@ async function requestChatCompletion(provider, messages, options = {}) {
       elapsedMs: Date.now() - startedAt,
     });
     if (error.name === "AbortError") {
-      throw new Error("模型请求超时，请检查 Base URL、网络或供应商状态。");
+      throw new Error("Model request timed out. Check the Base URL, network connection, or provider status.");
     }
     throw error;
   } finally {
@@ -121,7 +121,7 @@ function buildProviderModelsEndpoint(baseUrl) {
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error("Base URL 无效，请填写类似 https://api.openai.com/v1 的地址。");
+    throw new Error("Invalid Base URL. Please enter an address like https://api.openai.com/v1.");
   }
 
   const pathName = parsed.pathname.replace(/\/+$/, "");
@@ -135,7 +135,7 @@ function buildProviderImageEndpoint(baseUrl) {
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error("Base URL 无效，请填写类似 https://api.openai.com/v1 的地址。");
+    throw new Error("Invalid Base URL. Please enter an address like https://api.openai.com/v1.");
   }
 
   const pathName = parsed.pathname.replace(/\/+$/, "");
@@ -149,7 +149,7 @@ function buildProviderEndpoint(baseUrl, apiMode) {
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error("Base URL 无效，请填写类似 https://api.openai.com/v1 的地址。");
+    throw new Error("Invalid Base URL. Please enter an address like https://api.openai.com/v1.");
   }
 
   const pathName = parsed.pathname.replace(/\/+$/, "");
@@ -159,11 +159,11 @@ function buildProviderEndpoint(baseUrl, apiMode) {
 
 async function requestImageGeneration(provider, prompt, options = {}) {
   if (!provider?.baseUrl || !provider?.apiKey || !provider?.model) {
-    throw new Error("供应商配置不完整。");
+    throw new Error("Provider configuration is incomplete.");
   }
   const normalizedPrompt = String(prompt || "").trim();
   if (!normalizedPrompt) {
-    throw new Error("图片提示词不能为空。");
+    throw new Error("Image prompt cannot be empty.");
   }
 
   const startedAt = Date.now();
@@ -205,18 +205,18 @@ async function requestImageGeneration(provider, prompt, options = {}) {
         elapsedMs: Date.now() - startedAt,
         responsePreview: responseText.slice(0, 500),
       }, "warn");
-      throw new Error(`图片生成失败：${response.status} ${formatProviderError(responseText, endpoint)}`);
+      throw new Error(`Image generation failed: ${response.status} ${formatProviderError(responseText, endpoint)}`);
     }
 
     let parsed;
     try {
       parsed = JSON.parse(responseText);
     } catch {
-      throw new Error(`图片生成接口没有返回 JSON。请检查 Base URL。当前请求：${endpoint}`);
+      throw new Error(`The image generation endpoint did not return JSON. Check the Base URL. Current request: ${endpoint}`);
     }
 
     if (!Array.isArray(parsed?.data) || parsed.data.length === 0) {
-      throw new Error("图片生成接口返回成功，但没有图片数据。");
+      throw new Error("The image generation endpoint succeeded but returned no image data.");
     }
 
     logAi("image:done", {
@@ -238,7 +238,7 @@ async function requestImageGeneration(provider, prompt, options = {}) {
       if (!timeout.didTimeout() && options.abortMessage) {
         throw new Error(options.abortMessage);
       }
-      throw new Error("图片生成超时，请检查 Base URL、网络或供应商状态。");
+      throw new Error("Image generation timed out. Check the Base URL, network connection, or provider status.");
     }
     throw error;
   } finally {
@@ -248,7 +248,7 @@ async function requestImageGeneration(provider, prompt, options = {}) {
 
 async function listProviderModels(provider, options = {}) {
   if (!provider?.baseUrl || !provider?.apiKey) {
-    throw new Error("请先填写 Base URL 和 API Key。");
+    throw new Error("Please fill in the Base URL and API key first.");
   }
 
   const startedAt = Date.now();
@@ -277,14 +277,14 @@ async function listProviderModels(provider, options = {}) {
         elapsedMs: Date.now() - startedAt,
         responsePreview: responseText.slice(0, 500),
       }, "warn");
-      throw new Error(`读取模型列表失败：${response.status} ${formatProviderError(responseText, endpoint)}`);
+      throw new Error(`Failed to load the model list: ${response.status} ${formatProviderError(responseText, endpoint)}`);
     }
 
     let parsed;
     try {
       parsed = JSON.parse(responseText);
     } catch {
-      throw new Error(`模型列表接口没有返回 JSON。请检查 Base URL。当前请求：${endpoint}`);
+      throw new Error(`The model list endpoint did not return JSON. Check the Base URL. Current request: ${endpoint}`);
     }
 
     const ids = Array.isArray(parsed?.data)
@@ -294,7 +294,7 @@ async function listProviderModels(provider, options = {}) {
       : [];
 
     if (!ids.length) {
-      throw new Error("模型列表接口返回成功，但没有可用模型。");
+      throw new Error("The model list endpoint succeeded, but no usable models were returned.");
     }
 
     const models = [...new Set(ids)].sort((a, b) => a.localeCompare(b));
@@ -312,7 +312,7 @@ async function listProviderModels(provider, options = {}) {
       elapsedMs: Date.now() - startedAt,
     });
     if (error.name === "AbortError") {
-      throw new Error("读取模型列表超时，请检查 Base URL、网络或供应商状态。");
+      throw new Error("Timed out while reading the model list. Check the Base URL, network connection, or provider status.");
     }
     throw error;
   } finally {
@@ -382,7 +382,7 @@ function buildProviderRequestBody(provider, messages, options = {}) {
 function formatProviderError(responseText, endpoint) {
   const trimmed = responseText.trim();
   if (trimmed.startsWith("<")) {
-    return `供应商返回了 HTML 页面，通常是 Base URL 或接口类型不匹配。当前请求：${endpoint}`;
+    return `The provider returned an HTML page. This usually means the Base URL or API type does not match. Current request: ${endpoint}`;
   }
   return trimmed.slice(0, 500);
 }
@@ -415,10 +415,10 @@ function extractStreamText(data, apiMode) {
 
 async function requestChatCompletionStream(provider, messages, onChunk, options = {}) {
   if (!provider?.baseUrl || !provider?.apiKey || !provider?.model) {
-    throw new Error("供应商配置不完整。");
+    throw new Error("Provider configuration is incomplete.");
   }
   if (provider.apiMode === "imageGenerations") {
-    throw new Error("当前供应商配置为图片生成接口，请使用图片生成请求。");
+    throw new Error("The current provider is configured for image generation. Please use an image generation request instead.");
   }
 
   const startedAt = Date.now();
@@ -464,11 +464,11 @@ async function requestChatCompletionStream(provider, messages, onChunk, options 
         elapsedMs: Date.now() - startedAt,
         responsePreview: errorText.slice(0, 500),
       }, "warn");
-      throw new Error(`模型请求失败：${response.status} ${formatProviderError(errorText, endpoint)}`);
+      throw new Error(`Model request failed: ${response.status} ${formatProviderError(errorText, endpoint)}`);
     }
 
     const reader = response.body?.getReader();
-    if (!reader) throw new Error("供应商没有返回可读取的流。");
+    if (!reader) throw new Error("The provider did not return a readable stream.");
 
     const decoder = new TextDecoder();
     let buffer = "";
@@ -518,7 +518,7 @@ async function requestChatCompletionStream(provider, messages, onChunk, options 
       if (!timeout.didTimeout() && options.abortMessage) {
         throw new Error(options.abortMessage);
       }
-      throw new Error("模型请求超时，请检查 Base URL、网络或供应商状态。");
+      throw new Error("Model request timed out. Check the Base URL, network connection, or provider status.");
     }
     throw error;
   } finally {

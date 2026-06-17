@@ -1,6 +1,6 @@
 import type { BrowserActionRecord, BrowserNetworkRecord } from "../vite-env";
 
-export const DEFAULT_BROWSER_START_URL = "https://www.baidu.com/";
+export const DEFAULT_BROWSER_START_URL = "https://www.google.com/";
 
 export function normalizeBrowserUrl(value: string) {
   const trimmed = value.trim();
@@ -20,11 +20,11 @@ export function upsertBrowserNetworkRecord(
 }
 
 export function formatBrowserActionSummary(record: BrowserActionRecord) {
-  if (record.type === "navigate") return `跳转到 ${record.url}`;
-  if (record.type === "submit") return `提交表单 · ${record.targetLabel || record.selector || "未知目标"}`;
-  if (record.type === "input") return `输入内容 · ${record.targetLabel || record.selector || "未知目标"}`;
-  if (record.type === "change") return `修改字段 · ${record.targetLabel || record.selector || "未知目标"}`;
-  return `点击元素 · ${record.targetLabel || record.selector || "未知目标"}`;
+  if (record.type === "navigate") return `Navigate to ${record.url}`;
+  if (record.type === "submit") return `Submit form · ${record.targetLabel || record.selector || "Unknown target"}`;
+  if (record.type === "input") return `Enter text · ${record.targetLabel || record.selector || "Unknown target"}`;
+  if (record.type === "change") return `Change field · ${record.targetLabel || record.selector || "Unknown target"}`;
+  return `Click element · ${record.targetLabel || record.selector || "Unknown target"}`;
 }
 
 export function formatBrowserNetworkSummary(record: BrowserNetworkRecord) {

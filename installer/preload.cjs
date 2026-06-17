@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("novayxkInstaller", {
   getDefaults: () => ipcRenderer.invoke("installer:getDefaults"),
-  chooseDirectory: (currentPath) => ipcRenderer.invoke("installer:chooseDirectory", currentPath),
+  chooseDirectory: (currentPath, language) => ipcRenderer.invoke("installer:chooseDirectory", currentPath, language),
   install: (options) => ipcRenderer.invoke("installer:install", options),
   uninstall: (options) => ipcRenderer.invoke("installer:uninstall", options),
   finalizeUninstall: () => ipcRenderer.invoke("installer:finalizeUninstall"),

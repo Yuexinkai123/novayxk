@@ -1,5 +1,7 @@
 import React from "react";
 import { Check, FilePlus2, FolderPlus } from "lucide-react";
+import type { AppLanguage } from "../../vite-env";
+import { getLocaleStrings } from "../../app/i18n";
 
 export type CreateEntryDialogState = {
   kind: "file" | "directory";
@@ -7,6 +9,7 @@ export type CreateEntryDialogState = {
 };
 
 type CreateEntryDialogProps = {
+  language: AppLanguage;
   dialog: CreateEntryDialogState;
   projectLabel: string;
   canSubmit: boolean;
@@ -16,6 +19,7 @@ type CreateEntryDialogProps = {
 };
 
 export function CreateEntryDialog({
+  language,
   dialog,
   projectLabel,
   canSubmit,
@@ -23,23 +27,26 @@ export function CreateEntryDialog({
   onCancel,
   onSubmit,
 }: CreateEntryDialogProps) {
+  const strings = getLocaleStrings(language).createEntry;
+  const createLabel = dialog.kind === "file" ? strings.createFile : strings.createFolder;
+
   return (
     <div className="modal-backdrop" role="presentation">
       <section
         className="confirm-modal create-entry-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={dialog.kind === "file" ? "新建文件" : "新建文件夹"}
+        aria-label={createLabel}
       >
         <div className="modal-header">
           <div>
-            <span>{dialog.kind === "file" ? "新建文件" : "新建文件夹"}</span>
+            <span>{createLabel}</span>
             <h2>{projectLabel}</h2>
           </div>
           {dialog.kind === "file" ? <FilePlus2 size={23} /> : <FolderPlus size={23} />}
         </div>
         <label className="create-entry-field">
-          路径
+          {strings.path}
           <input
             autoFocus
             value={dialog.path}
@@ -48,17 +55,17 @@ export function CreateEntryDialog({
               if (event.key === "Enter") onSubmit();
               if (event.key === "Escape") onCancel();
             }}
-            placeholder={dialog.kind === "file" ? "src/new-file.ts" : "src/new-folder"}
+            placeholder={dialog.kind === "file" ? strings.filePlaceholder : strings.folderPlaceholder}
           />
         </label>
-        <p className="memory-hint">路径相对于当前项目根目录。可以输入子目录，例如 src/components/Button.tsx。</p>
+        <p className="memory-hint">{strings.hint}</p>
         <div className="modal-actions">
           <button className="ghost-button" onClick={onCancel}>
-            取消
+            {strings.cancel}
           </button>
           <button className="primary-button" onClick={onSubmit} disabled={!canSubmit}>
             <Check size={17} />
-            创建
+            {strings.create}
           </button>
         </div>
       </section>

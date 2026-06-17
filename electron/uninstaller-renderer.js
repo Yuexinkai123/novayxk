@@ -7,8 +7,8 @@ const state = {
   userDataDir: "",
   userDataExists: false,
   progressPercent: 0,
-  progressTitle: "等待开始",
-  progressDetail: "点击“开始卸载”后会逐步清理进程、快捷方式和系统卸载入口。",
+  progressTitle: "Waiting to start",
+  progressDetail: "Click Start uninstall to clean running processes, shortcuts, and the Windows uninstall entry step by step.",
 };
 
 const elements = {
@@ -62,8 +62,8 @@ function bindEvents() {
 async function startUninstall() {
   state.running = true;
   state.progressPercent = 0;
-  state.progressTitle = "准备卸载";
-  state.progressDetail = "正在检查程序目录并准备清理。";
+  state.progressTitle = "Preparing uninstall";
+  state.progressDetail = "Checking the app directory and preparing cleanup.";
   elements.resultText.textContent = "";
   render();
   try {
@@ -73,16 +73,16 @@ async function startUninstall() {
     });
     state.completed = true;
     state.progressPercent = 100;
-    state.progressTitle = "卸载准备完成";
+    state.progressTitle = "Uninstall ready to finish";
     state.progressDetail = result.deleteUserData
-      ? "主程序已移除。点击完成后会在后台继续删除安装目录和 .novayxk 数据。"
-      : "主程序已移除。点击完成后会在后台继续删除安装目录，.novayxk 数据会保留。";
+      ? "The app has been removed. Click Done to continue deleting the install folder and .novayxk data in the background."
+      : "The app has been removed. Click Done to continue deleting the install folder while keeping .novayxk data.";
     elements.resultText.textContent = result.deleteUserData
-      ? "卸载准备完成。关闭窗口后会继续删除程序目录和 .novayxk 数据。"
-      : "卸载准备完成。关闭窗口后会继续删除程序目录，.novayxk 数据会保留下来。";
+      ? "Uninstall is ready to finish. Closing the window will continue deleting the app folder and .novayxk data."
+      : "Uninstall is ready to finish. Closing the window will continue deleting the app folder while keeping .novayxk data.";
   } catch (error) {
-    state.progressTitle = "卸载失败";
-    const message = normalizeUninstallError(error?.message || "卸载失败。");
+    state.progressTitle = "Uninstall failed";
+    const message = normalizeUninstallError(error?.message || "Uninstall failed.");
     state.progressDetail = message;
     elements.resultText.textContent = message;
   } finally {
@@ -106,14 +106,14 @@ function render() {
   elements.openUserDataButton.disabled = state.running || !state.userDataExists;
 
   if (state.completed) {
-    elements.primaryButton.textContent = "完成";
-    elements.secondaryButton.textContent = "关闭";
+    elements.primaryButton.textContent = "Done";
+    elements.secondaryButton.textContent = "Close";
   } else if (state.running) {
-    elements.primaryButton.textContent = "卸载中";
-    elements.secondaryButton.textContent = "请稍等";
+    elements.primaryButton.textContent = "Uninstalling";
+    elements.secondaryButton.textContent = "Please wait";
   } else {
-    elements.primaryButton.textContent = "开始卸载";
-    elements.secondaryButton.textContent = "取消";
+    elements.primaryButton.textContent = "Start uninstall";
+    elements.secondaryButton.textContent = "Cancel";
   }
 
   renderProgress();
@@ -121,8 +121,8 @@ function render() {
 
 function updateProgress(progress) {
   state.progressPercent = Math.max(0, Math.min(100, Number(progress?.percent) || 0));
-  state.progressTitle = progress?.title || "正在卸载";
-  state.progressDetail = progress?.detail || "请稍等。";
+  state.progressTitle = progress?.title || "Uninstalling";
+  state.progressDetail = progress?.detail || "Please wait.";
   renderProgress();
 }
 
@@ -139,19 +139,19 @@ function normalizeUninstallError(message) {
     .replace(/^Error:\s*/i, "")
     .trim();
 
-  if (!cleaned) return "卸载失败。";
+  if (!cleaned) return "Uninstall failed.";
 
   if (/没有在这里找到|找不到 Novayxk 主程序或卸载器/i.test(cleaned)) {
     return [
-      "卸载失败：当前目录里没有识别到 Novayxk 主程序。",
-      "请确认你选择的是 Novayxk 的实际安装目录，或者从“应用和功能”里重新发起卸载。",
+      "Uninstall failed: the Novayxk app was not found in this folder.",
+      "Make sure you selected the real Novayxk install directory, or start uninstall again from Windows Apps & features.",
     ].join("\n");
   }
 
   if (/EBUSY|EPERM|EACCES|占用|拒绝访问/i.test(cleaned)) {
     return [
-      "卸载失败：仍有文件正在被占用。",
-      "请先关闭 Novayxk、资源管理器中的安装目录窗口，以及相关终端后再重试。",
+      "Uninstall failed: some files are still in use.",
+      "Close Novayxk, any Explorer windows opened at the install folder, and related terminal sessions, then try again.",
     ].join("\n");
   }
 

@@ -1,8 +1,10 @@
 import { ChevronDown, ChevronRight, FileCode2, Folder, FolderOpen } from "lucide-react";
-import type { FileNode } from "../vite-env";
+import type { AppLanguage, FileNode } from "../vite-env";
+import { getLocaleStrings } from "../app/i18n";
 
 export function TreeNode({
   node,
+  language,
   depth,
   expandedPaths,
   selectedPath,
@@ -11,6 +13,7 @@ export function TreeNode({
   forceExpanded = false,
 }: {
   node: FileNode;
+  language: AppLanguage;
   depth: number;
   expandedPaths: Set<string>;
   selectedPath?: string;
@@ -22,6 +25,7 @@ export function TreeNode({
   const isDirectory = node.type === "directory";
   const isSelected = selectedPath === node.path;
   const isLoading = loadingPaths.has(node.path);
+  const strings = getLocaleStrings(language).tree;
 
   return (
     <div>
@@ -40,9 +44,9 @@ export function TreeNode({
           <FileCode2 size={15} />
         )}
         <span>{node.name}</span>
-        {isDirectory && isLoading && <small>加载</small>}
-        {isDirectory && !node.loaded && !forceExpanded && !isLoading && <small>更多</small>}
-        {node.sensitive && <small>敏感</small>}
+        {isDirectory && isLoading && <small>{strings.loading}</small>}
+        {isDirectory && !node.loaded && !forceExpanded && !isLoading && <small>{strings.more}</small>}
+        {node.sensitive && <small>{strings.sensitive}</small>}
       </button>
       {isDirectory &&
         isExpanded &&
@@ -50,6 +54,7 @@ export function TreeNode({
           <TreeNode
             key={child.path}
             node={child}
+            language={language}
             depth={depth + 1}
             expandedPaths={expandedPaths}
             selectedPath={selectedPath}

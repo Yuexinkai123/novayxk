@@ -47,6 +47,6 @@ export function mergeTokenUsage(...usages: Array<TokenUsage | null | undefined>)
 }
 
 export function formatTokenUsage(usage: TokenUsage) {
-  const prefix = usage.estimated === false ? "token" : "约 token";
-  return `${prefix} ${usage.totalTokens.toLocaleString()}（输入 ${usage.promptTokens.toLocaleString()} / 输出 ${usage.completionTokens.toLocaleString()}）`;
+  const prefix = usage.estimated === false ? "tokens" : "Approx. tokens";
+  return `${prefix} ${usage.totalTokens.toLocaleString()} (input ${usage.promptTokens.toLocaleString()} / output ${usage.completionTokens.toLocaleString()})`;
 }
