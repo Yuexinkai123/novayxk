@@ -2,6 +2,7 @@ export {
   buildUserIntentInstruction,
   getUserIntentProfile,
   shouldAutoExecutePowerShellForPrompt,
+  shouldForceBuiltInWebSearch,
   shouldAutoInspectCurrentMachine,
   type UserIntentKind,
   type UserIntentProfile,

@@ -16,10 +16,13 @@ export type AssistantModeProfile = {
   memoryLimit: number;
   taskSummaryLimit: number;
   selectedFileLimit: number;
+  latestContextLimit: number;
   historyLimitWithContext?: number;
   historyLimitWithoutContext: number;
   continuationHistoryLimit: number;
   commandSummaryHistoryLimit: number;
+  userMessageCharLimit: number;
+  assistantMessageCharLimit: number;
   projectFileListLimit: number;
   projectRelatedFileLimit?: number;
   projectRelatedContentLimit: number;
@@ -28,39 +31,51 @@ export type AssistantModeProfile = {
 const ASSISTANT_MODE_PROFILES: Record<AssistantMode, AssistantModeProfile> = {
   low: {
     mode: "low",
-    memoryLimit: 2200,
-    taskSummaryLimit: 1200,
-    selectedFileLimit: 7000,
-    historyLimitWithContext: 6,
-    historyLimitWithoutContext: 5,
-    continuationHistoryLimit: 6,
-    commandSummaryHistoryLimit: 10,
-    projectFileListLimit: 90,
-    projectRelatedFileLimit: 4,
-    projectRelatedContentLimit: 5000,
+    memoryLimit: 1200,
+    taskSummaryLimit: 700,
+    selectedFileLimit: 2200,
+    latestContextLimit: 3200,
+    historyLimitWithContext: 5,
+    historyLimitWithoutContext: 4,
+    continuationHistoryLimit: 5,
+    commandSummaryHistoryLimit: 8,
+    userMessageCharLimit: 420,
+    assistantMessageCharLimit: 280,
+    projectFileListLimit: 40,
+    projectRelatedFileLimit: 2,
+    projectRelatedContentLimit: 1400,
   },
   standard: {
     mode: "standard",
-    memoryLimit: 6000,
-    taskSummaryLimit: 3000,
-    selectedFileLimit: 12000,
-    historyLimitWithoutContext: 6,
-    continuationHistoryLimit: 8,
-    commandSummaryHistoryLimit: 20,
-    projectFileListLimit: 180,
-    projectRelatedContentLimit: 8000,
+    memoryLimit: 2600,
+    taskSummaryLimit: 1400,
+    selectedFileLimit: 4200,
+    latestContextLimit: 5200,
+    historyLimitWithContext: 6,
+    historyLimitWithoutContext: 5,
+    continuationHistoryLimit: 6,
+    commandSummaryHistoryLimit: 12,
+    userMessageCharLimit: 760,
+    assistantMessageCharLimit: 520,
+    projectFileListLimit: 90,
+    projectRelatedFileLimit: 4,
+    projectRelatedContentLimit: 2400,
   },
   deep: {
     mode: "deep",
-    memoryLimit: 10000,
-    taskSummaryLimit: 5000,
-    selectedFileLimit: 20000,
-    historyLimitWithoutContext: 14,
-    continuationHistoryLimit: 12,
-    commandSummaryHistoryLimit: 30,
-    projectFileListLimit: 260,
-    projectRelatedFileLimit: 8,
-    projectRelatedContentLimit: 12000,
+    memoryLimit: 4500,
+    taskSummaryLimit: 2400,
+    selectedFileLimit: 8000,
+    latestContextLimit: 8800,
+    historyLimitWithContext: 10,
+    historyLimitWithoutContext: 10,
+    continuationHistoryLimit: 9,
+    commandSummaryHistoryLimit: 18,
+    userMessageCharLimit: 1200,
+    assistantMessageCharLimit: 900,
+    projectFileListLimit: 160,
+    projectRelatedFileLimit: 6,
+    projectRelatedContentLimit: 5000,
   },
 };
 
@@ -71,6 +86,63 @@ export function normalizeAssistantMode(value: unknown): AssistantMode {
 
 export function getAssistantModeProfile(mode: AssistantMode = "standard") {
   return ASSISTANT_MODE_PROFILES[normalizeAssistantMode(mode)];
+}
+
+function normalizePromptWhitespace(value: string) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function smartTruncate(value: string, limit: number, tailRatio = 0.28) {
+  const normalized = normalizePromptWhitespace(value);
+  if (!normalized || limit <= 0 || normalized.length <= limit) return normalized;
+  const tail = Math.max(80, Math.floor(limit * tailRatio));
+  const head = Math.max(140, limit - tail - 32);
+  const omitted = normalized.length - head - tail;
+  return `${normalized.slice(0, head)}\n... [truncated ${omitted} chars] ...\n${normalized.slice(-tail)}`;
+}
+
+function compactCodeBlocksForPrompt(content: string, blockLimit: number) {
+  return content.replace(/```([A-Za-z][\w-]*)?\n([\s\S]*?)```/g, (_full, language: string | undefined, code: string) => {
+    const compact = smartTruncate(code, blockLimit, 0.22);
+    const label = language ? `${language} block` : "code block";
+    return `\n[${label}]\n${compact}\n`;
+  });
+}
+
+export function compactPromptText(content: string, limit: number) {
+  const withoutHugeCode = compactCodeBlocksForPrompt(String(content || ""), Math.max(160, Math.floor(limit * 0.45)));
+  return smartTruncate(withoutHugeCode, limit);
+}
+
+function getPromptMessageLimit(profile: AssistantModeProfile, role: ChatMessage["role"], distanceFromEnd: number) {
+  const baseLimit = role === "assistant" ? profile.assistantMessageCharLimit : profile.userMessageCharLimit;
+  if (distanceFromEnd === 0) return Math.round(baseLimit * 1.2);
+  if (distanceFromEnd === 1) return baseLimit;
+  return Math.max(180, Math.round(baseLimit * 0.72));
+}
+
+export function buildCompressedPromptHistory(
+  messages: ChatMessage[],
+  limit: number,
+  assistantMode: AssistantMode = "standard",
+) {
+  const profile = getAssistantModeProfile(assistantMode);
+  const scopedMessages = sanitizeChatHistory(messages).slice(-limit);
+  return scopedMessages.map((message, index) => {
+    const distanceFromEnd = scopedMessages.length - 1 - index;
+    const content = message.role === "user"
+      ? stripInjectedContext(message.content).trim()
+      : String(message.content ?? "");
+    return {
+      role: message.role,
+      content: compactPromptText(content, getPromptMessageLimit(profile, message.role, distanceFromEnd)),
+    };
+  });
 }
 
 function getAssistantModeSystemInstruction(mode: AssistantMode) {
@@ -92,9 +164,9 @@ export function buildSystemPrompt(
   const profile = getAssistantModeProfile(assistantMode);
   const normalizedAssistantMode = profile.mode;
   const memoryBlock = projectMemory.trim()
-    ? `\n\n[Project long-term memory]\n${projectMemory.trim().slice(0, profile.memoryLimit)}`
+    ? `\n\n[Project long-term memory]\n${compactPromptText(projectMemory.trim(), profile.memoryLimit)}`
     : "";
-  const taskBlock = taskSummary.trim() ? `\n\n[Current task summary]\n${taskSummary.trim().slice(0, profile.taskSummaryLimit)}` : "";
+  const taskBlock = taskSummary.trim() ? `\n\n[Current task summary]\n${compactPromptText(taskSummary.trim(), profile.taskSummaryLimit)}` : "";
   const windowsPrivilegeBlock = runtimePermission.isAdmin
     ? "Current Novayxk Windows process privilege: administrator. You may tell the user clearly that the app is already running with administrator privileges."
     : `Current Novayxk Windows process privilege: ${runtimePermission.privilegeLabel}. When the user asks to switch "administrator mode", "system permission", or "administrator privilege", that usually refers to the Administrator Mode button in Settings: Novayxk can request Windows UAC approval and restart with administrator privileges. Do not answer as if the user must manually right-click and reopen the app. Do not confuse Windows process privilege with Novayxk's internal execution scope.`;
@@ -121,6 +193,7 @@ For complex tasks, you may first give a minimal 2-to-4-step plan, but immediatel
 When the user asks you to inspect, organize, or summarize the current project, and the context already includes a project summary, file list, or related file content, give the project summary directly. Do not reply only with preparatory lines such as "let me look first" or "I will summarize later."
 
 Prefer strict JSON \`\`\`fileops\`\`\` for file creation or modification, strict JSON \`\`\`browser-actions\`\`\` for browser operations, strict JSON \`\`\`web-search\`\`\` for built-in online search, and place PowerShell commands only inside standalone \`\`\`powershell-run\`\`\` blocks. Do not ask the user to copy and run commands manually. After outputting these blocks, wait for Novayxk to return the actual result before summarizing. After a powershell-run block, do not append invented "results", "execution output", "conclusions", "installed", "version", or "path" claims in the same reply, because the command has not really run yet.
+Do not output fake placeholder labels such as [powershell-run block], [text block], [json block], [fileops block], or similar bracketed block descriptions. When a block is needed, output a real fenced code block only.
 
 Avoid leaking sensitive credentials. Do not fill passwords, verification codes, payments, or external authorization steps on the user's behalf. Explain the purpose carefully before high-risk, destructive, system-setting, or protected-directory actions.`;
     return `${compactBehaviorBlock}${shellBlock}${memoryBlock}${taskBlock}`;
@@ -152,7 +225,8 @@ Browser traces may only be used to analyze the user's own page flow and API shap
 
 When the context contains a "Browser API evidence pack", treat it as the highest-priority evidence for generating site scripts. Follow the real request order, method, URL, header names, request body, and response fields from the evidence pack. Do not let older chat guesses about token, session, or access_token override the captured evidence. If the evidence pack lacks a critical login or check-in request, first use browser-actions to open the page, click the user-specified button, or inspect page state further rather than inventing API fields. After generating the script, validate it through powershell-run, and if it fails, repair it according to the real output rather than claiming it might have been blocked by safety policy unless the output explicitly says so.
 
-When PowerShell commands are needed, you must return a complete standalone \`\`\`powershell-run\`\`\` block, and each block should contain only one command or one closely related group of commands. Project-related commands run in the current project root. System tasks such as software installation, system queries, opening webpages or stores, online research fallbacks, and Novayxk log inspection run from the user's home directory and may be attempted even when no project is open. Do not output XML-style tool-call formats such as <tool_call>, <function=shell>, or <parameter=command>; Novayxk does not use that protocol. Do not place commands in plain prose, inline code, or generic \`\`\`text\`\`\` blocks. After you output powershell-run, fileops, browser-actions, or web-search, Novayxk will execute them automatically and hand the result back to you for summarization, so do not ask the user to run commands manually, copy outputs, or send the result back. Also do not say "installation started", "wait for the result", or invent checks, execution outputs, conclusions, installed states, versions, or paths before the real execution result exists. fileops paths must stay relative to the current project. PowerShell commands run in the current project root by default, but when the user explicitly asks for system, software, web, or log tasks, those commands may access the required outside-project paths, network URLs, or Novayxk's own logs. Do not ask the user to reveal secrets.`;
+When PowerShell commands are needed, you must return a complete standalone \`\`\`powershell-run\`\`\` block, and each block should contain only one command or one closely related group of commands. Project-related commands run in the current project root. System tasks such as software installation, system queries, opening webpages or stores, online research fallbacks, and Novayxk log inspection run from the user's home directory and may be attempted even when no project is open. Do not output XML-style tool-call formats such as <tool_call>, <function=shell>, or <parameter=command>; Novayxk does not use that protocol. Do not place commands in plain prose, inline code, or generic \`\`\`text\`\`\` blocks. After you output powershell-run, fileops, browser-actions, or web-search, Novayxk will execute them automatically and hand the result back to you for summarization, so do not ask the user to run commands manually, copy outputs, or send the result back. Also do not say "installation started", "wait for the result", or invent checks, execution outputs, conclusions, installed states, versions, or paths before the real execution result exists. fileops paths must stay relative to the current project. PowerShell commands run in the current project root by default, but when the user explicitly asks for system, software, web, or log tasks, those commands may access the required outside-project paths, network URLs, or Novayxk's own logs. Do not ask the user to reveal secrets.
+Do not output fake placeholder labels such as [powershell-run block], [text block], [json block], [fileops block], or similar bracketed block descriptions. When a block is needed, output a real fenced code block only.`;
   return `${behaviorBlock}${shellBlock}${memoryBlock}${taskBlock}`;
 }
 
@@ -260,12 +334,17 @@ export function buildModelChatHistory(
   if (/(?:浏览器 API 证据包|Browser API evidence pack)/i.test(latestContext)) {
     const lastUserMessage = cleanMessages.filter((message) => message.role === "user").at(-1);
     return lastUserMessage
-      ? [{ ...lastUserMessage, content: `${stripInjectedContext(lastUserMessage.content)}${latestContext}` }]
+      ? [{
+          ...lastUserMessage,
+          content: compactPromptText(`${stripInjectedContext(lastUserMessage.content)}${latestContext}`, profile.latestContextLimit),
+        }]
       : [];
   }
   const hasLatestContext = latestContext.trim().length > 0;
   const historyLimit = hasLatestContext ? profile.historyLimitWithContext : profile.historyLimitWithoutContext;
-  const scopedMessages = typeof historyLimit === "number" ? cleanMessages.slice(-historyLimit) : cleanMessages;
+  const scopedMessages = typeof historyLimit === "number"
+    ? buildCompressedPromptHistory(cleanMessages, historyLimit, assistantMode)
+    : buildCompressedPromptHistory(cleanMessages, cleanMessages.length, assistantMode);
   if (!hasLatestContext && scopedMessages.length > 0) {
     return scopedMessages.filter((message) => !looksLikeProjectContextReply(message.content));
   }
@@ -275,7 +354,7 @@ export function buildModelChatHistory(
     if (index !== lastIndex || message.role !== "user") return message;
     return {
       ...message,
-      content: `${stripInjectedContext(message.content)}${latestContext}`,
+      content: compactPromptText(`${stripInjectedContext(message.content)}${latestContext}`, profile.latestContextLimit),
     };
   });
 }
@@ -360,6 +439,10 @@ export function isAbortPlaceholderMessage(message: ChatMessage) {
 }
 
 export function normalizeAssistantToolCallContent(content: string) {
+  const normalizedBracketBlocks = normalizeBracketedCodeBlocks(content);
+  if (normalizedBracketBlocks !== content) {
+    content = normalizedBracketBlocks;
+  }
   if (!/<tool_call\b|<function=|<tool_result\b/i.test(content)) return content;
 
   const toolCalls = [...content.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi)];
@@ -389,6 +472,45 @@ export function normalizeAssistantToolCallContent(content: string) {
   normalized = normalized.replace(/<tool_call\b[\s\S]*$/i, "Preparing the command request...");
   normalized = normalized.replace(/<function=[\s\S]*$/i, "Preparing the command request...");
   return normalized.trim();
+}
+
+function normalizeBracketedCodeBlocks(content: string) {
+  const lines = String(content || "").replace(/\r\n/g, "\n").split("\n");
+  if (!lines.some((line) => /^\[(?:powershell-run|ps-run|shell-run|text|json|fileops|browser-actions|web-search)\s+block\]$/i.test(line.trim()))) {
+    return content;
+  }
+
+  const nextLines: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index]?.trim().match(/^\[([a-z-]+)\s+block\]$/i);
+    if (!match) {
+      nextLines.push(lines[index]);
+      continue;
+    }
+
+    const language = match[1].toLowerCase();
+    const blockLines: string[] = [];
+    let cursor = index + 1;
+    while (cursor < lines.length && lines[cursor].trim() !== "") {
+      blockLines.push(lines[cursor]);
+      cursor += 1;
+    }
+
+    if (!blockLines.length) {
+      nextLines.push(lines[index]);
+      continue;
+    }
+
+    nextLines.push(`\`\`\`${language}`);
+    nextLines.push(...blockLines);
+    nextLines.push("```");
+    if (cursor < lines.length && lines[cursor].trim() === "") {
+      nextLines.push("");
+    }
+    index = cursor;
+  }
+
+  return nextLines.join("\n");
 }
 
 export function stripPrematurePowerShellResultText(content: string) {
@@ -893,7 +1015,7 @@ export function formatProjectContext(context: ProjectContext, assistantMode: Ass
   const relatedBlocks = relatedFiles
     .map(
       (file) =>
-        `\n\nRelated file: ${file.path}${file.truncated ? " (truncated)" : ""}\n\`\`\`\n${file.content.slice(0, profile.projectRelatedContentLimit)}\n\`\`\``,
+        `\n\nRelated file: ${file.path}${file.truncated ? " (truncated)" : ""}\n\`\`\`\n${compactPromptText(file.content, profile.projectRelatedContentLimit)}\n\`\`\``,
     )
     .join("");
 

@@ -2,8 +2,10 @@ import type { MutableRefObject } from "react";
 import type { BrowserAutomationAction } from "../browser/actions";
 import {
   STREAM_ABORT_MESSAGE,
+  buildCompressedPromptHistory,
   buildModelChatHistory,
   buildSystemPrompt,
+  compactPromptText,
   detectAdminPrivilegeRequest,
   detectAssistantModeRequest,
   detectInternalControlModeRequest,
@@ -28,6 +30,7 @@ import {
   buildUserIntentInstruction,
   getUserIntentProfile,
   isLikelyIncompleteAssistantReply,
+  shouldForceBuiltInWebSearch,
   type UserIntentProfile,
 } from "../policy";
 import { inspectSensitiveGeneratedContent, isWriteLikePowerShellCommand } from "../policy/sensitive";
@@ -66,9 +69,11 @@ type CommandInspection = { requiresAdmin?: boolean; adminReason?: string; requir
 
 const BROWSER_AUTOMATION_LOOP_LIMIT = 4;
 const BROWSER_AUTOMATION_REPEAT_LIMIT = 2;
-const WEB_SEARCH_LOOP_LIMIT = 3;
+const WEB_SEARCH_STALE_LIMIT = 2;
+const WEB_SEARCH_REQUESTS_PER_ROUND = 3;
 const MODEL_REQUEST_MAX_RETRIES = 5;
 const DEEP_VERIFICATION_CONTEXT_LIMIT = 5000;
+const FILEOPS_AUTO_REPAIR_FILE_LIMIT = 4;
 const SENSITIVE_AUTOMATION_PATTERN =
   /(?:password|passwd|pwd|authorization|cookie|set-cookie|new-api-user|api[_-]?key|secret|credential|document\.cookie|localstorage|sessionstorage|\/api\/user\/login|\/api\/auth\/login|__capturedrequests|xmlhttprequest\.prototype|window\.fetch\s*=)/i;
 
@@ -76,6 +81,20 @@ type VerificationDepth = "minimal" | "standard" | "deep";
 type VerificationSummary = {
   note: string;
   tokenUsage?: TokenUsage;
+};
+type WebSearchLoopState = {
+  roundsUsed: number;
+  maxRounds: number;
+  bonusRoundsUsed: number;
+  bestScore: number;
+  staleRounds: number;
+  seenRelevantHosts: Set<string>;
+};
+type WebSearchRoundAssessment = {
+  bestScore: number;
+  relevantResultCount: number;
+  newRelevantHosts: string[];
+  improved: boolean;
 };
 
 type UseAiAssistantOptions = {
@@ -217,6 +236,10 @@ export function useAiAssistant({
     });
   }
 
+  function buildPromptHistorySlice(messagesToCompress: ChatMessage[], limit: number) {
+    return buildCompressedPromptHistory(messagesToCompress, limit, assistantMode);
+  }
+
   function shouldRetryModelRequest(error: unknown) {
     const message = error instanceof Error ? error.message : String(error || "");
     if (!message || message === STREAM_ABORT_MESSAGE) return false;
@@ -267,9 +290,8 @@ export function useAiAssistant({
   }
 
   function appendVerificationNote(content: string, note: string) {
-    const trimmedNote = note.trim();
-    if (!trimmedNote) return content;
-    return `${content.trim()}\n\n${trimmedNote}`;
+    void note;
+    return content.trim();
   }
 
   function truncateForVerification(value: string, limit = DEEP_VERIFICATION_CONTEXT_LIMIT) {
@@ -278,6 +300,129 @@ export function useAiAssistant({
 
   function normalizeProjectRelativePath(relativePath: string) {
     return String(relativePath ?? "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/").trim();
+  }
+
+  function isFileOpsAutoRepairableError(message: string) {
+    return /original text to replace was not found|file already exists|file to replace does not exist/i.test(message);
+  }
+
+  async function buildFileOpsRepairEvidence(operations: FileOperation[]) {
+    const bridge = window.novayxk;
+    if (!bridge) return "";
+    const candidatePaths = [
+      ...new Set(
+        operations
+          .filter(
+            (
+              operation,
+            ): operation is Extract<FileOperation, { type: "write" }> | Extract<FileOperation, { type: "replace" }> =>
+              operation.type === "write" || operation.type === "replace",
+          )
+          .map((operation) => operation.path),
+      ),
+    ].slice(0, FILEOPS_AUTO_REPAIR_FILE_LIMIT);
+
+    const blocks: string[] = [];
+    for (const relativePath of candidatePaths) {
+      try {
+        const file = await bridge.readFile(relativePath);
+        blocks.push(`${isChinese ? "文件" : "File"}: ${relativePath}\n${truncateForVerification(file.content, 6000)}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : isChinese ? "读取失败" : "Read failed";
+        blocks.push(`${isChinese ? "文件" : "File"}: ${relativePath}\n${isChinese ? "当前读取失败" : "Current read failed"}: ${message}`);
+      }
+    }
+    return blocks.join("\n\n");
+  }
+
+  async function requestFileOpsAutoRepair(
+    assistantContent: string,
+    operations: FileOperation[],
+    baseMessages: ChatMessage[],
+    failureMessage: string,
+  ): Promise<{ content: string; operations: FileOperation[]; tokenUsage?: TokenUsage } | null> {
+    const bridge = window.novayxk;
+    if (!bridge || !isFileOpsAutoRepairableError(failureMessage)) return null;
+
+    const repairEvidence = await buildFileOpsRepairEvidence(operations);
+    const userGoal = getLatestUserGoal(baseMessages);
+    const promptMessages: ChatMessage[] = [
+      {
+        role: "system",
+        content: isChinese
+          ? `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+
+【文件修复重试规则】
+你正在修复一组刚刚执行失败的 fileops。
+- 只输出一个严格合法的 \`\`\`fileops\`\`\` JSON 数组，不要解释。
+- 必须根据下面提供的真实文件内容来写，不要想象原文。
+- 如果 replace 容易再次失败，就改用 write，并在需要时设置 overwrite:true。
+- 路径必须保持为当前项目内的相对路径。
+- 只修复当前失败所必需的文件，不要额外新增无关修改。`
+          : `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+
+[File repair retry rules]
+You are repairing a fileops payload that just failed to execute.
+- Output only one strict \`\`\`fileops\`\`\` JSON array, with no explanation.
+- Use the real file contents below. Do not invent the original text.
+- If replace is likely to fail again, switch to write and set overwrite:true when needed.
+- Keep every path relative to the current project.
+- Repair only the files necessary for this failure; do not add unrelated edits.`,
+      },
+      {
+        role: "user",
+        content: isChinese
+          ? `原始用户目标：${userGoal || "未提供"}
+
+原始助手输出：
+${truncateForVerification(assistantContent, 6000)}
+
+上次 fileops 失败原因：
+${failureMessage}
+
+上次 fileops JSON：
+\`\`\`json
+${truncateForVerification(JSON.stringify(operations, null, 2), 6000)}
+\`\`\`
+
+真实文件内容：
+${repairEvidence || "无可用文件内容"}
+
+请直接返回修复后的 fileops。`
+          : `Original user goal: ${userGoal || "Not provided"}
+
+Original assistant output:
+${truncateForVerification(assistantContent, 6000)}
+
+Previous fileops failure:
+${failureMessage}
+
+Previous fileops JSON:
+\`\`\`json
+${truncateForVerification(JSON.stringify(operations, null, 2), 6000)}
+\`\`\`
+
+Real file contents:
+${repairEvidence || "No file contents were available"}
+
+Return the corrected fileops directly.`,
+      },
+    ];
+
+    const rawReply = await runModelRequestWithRetries("File operations auto-repair request", () =>
+      bridge.chat({
+        provider: activeProvider,
+        messages: promptMessages,
+      }),
+    );
+    const repairedContent = stripPrematurePowerShellResultText(normalizeAssistantToolCallContent(String(rawReply || ""))).trim();
+    const repairedOperations = extractFileOps(repairedContent);
+    if (!repairedOperations.length) return null;
+    return {
+      content: repairedContent,
+      operations: repairedOperations,
+      tokenUsage: buildEstimatedTokenUsage(promptMessages, repairedContent),
+    };
   }
 
   function splitProjectPath(relativePath: string) {
@@ -672,11 +817,10 @@ You are performing a post-execution verification pass. Judge only from real resu
   }
 
   function buildPendingResumeMessages(baseMessages: ChatMessage[]) {
-    return sanitizeChatHistory(baseMessages)
-      .slice(-20)
+    return buildCompressedPromptHistory(baseMessages, 12, assistantMode)
       .map((message) => ({
         ...message,
-        content: String(message.content ?? "").slice(0, 12_000),
+        content: compactPromptText(String(message.content ?? ""), 4_000),
       }));
   }
 
@@ -709,6 +853,7 @@ You are performing a post-execution verification pass. Judge only from real resu
   async function buildBrowserContextForPrompt(userPrompt: string) {
     const bridge = window.novayxk;
     if (!bridge) return "";
+    const assistantModeProfile = getAssistantModeProfile(assistantMode);
 
     const normalized = userPrompt.trim().toLowerCase();
     const likelyBrowserTask =
@@ -716,7 +861,7 @@ You are performing a post-execution verification pass. Judge only from real resu
     if (!likelyBrowserTask) return "";
 
     try {
-      return await getBrowserPromptContext();
+      return `\n\n${compactPromptText(await getBrowserPromptContext(), assistantModeProfile.latestContextLimit)}`;
     } catch (error) {
       setStatus(formatActionableError(error, "Failed to read browser context"));
       return "";
@@ -948,6 +1093,76 @@ You are performing a post-execution verification pass. Judge only from real resu
       return nextMessages;
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI file operations failed";
+      const repaired = await requestFileOpsAutoRepair(assistantContent, operations, baseMessages, message).catch(() => null);
+      if (repaired && window.novayxk) {
+        const sensitiveMutation = repaired.operations
+          .filter(
+            (
+              operation,
+            ): operation is Extract<FileOperation, { type: "write" }> | Extract<FileOperation, { type: "replace" }> =>
+              operation.type === "write" || operation.type === "replace",
+          )
+          .map((operation) => ({
+            operation,
+            inspection: /\.(?:py|js|ts|mjs|cjs|ps1|bat|cmd|env|json|yaml|yml|toml|ini)$/i.test(operation.path)
+              ? inspectSensitiveGeneratedContent(
+                  operation.type === "write" ? operation.content : `${operation.search}\n${operation.replace}`,
+                )
+              : { blocked: false, reason: "" },
+          }))
+          .find(({ inspection }) => inspection.blocked);
+        if (!hasDestructiveFileOps(repaired.operations) && !sensitiveMutation) {
+          try {
+            setStatus(isChinese ? "首次写入失败，正在按真实文件内容自动重试..." : "The first file write failed. Retrying from the real file contents...");
+            const retriedResult = await window.novayxk.applyFileOps(repaired.operations);
+            const firstWrittenFile =
+              repaired.operations.find((operation) => operation.type === "write" || operation.type === "replace")?.path ?? null;
+            const selectedWasChanged = selectedFile ? retriedResult.changedFiles.includes(selectedFile.path) : false;
+            await syncProjectView({
+              preferredPath: selectedWasChanged ? selectedFile?.path ?? null : firstWrittenFile,
+            });
+            const verification = await buildFileOpsVerificationSummary(repaired.operations, retriedResult.changedFiles, baseMessages);
+            const completedMessages: ChatMessage[] = [
+              ...baseMessages,
+              {
+                role: "assistant",
+                content: appendVerificationNote(
+                  isChinese
+                    ? `首次 fileops 没有直接命中真实文件内容，我已按当前文件内容自动修正并执行成功：\n\n${retriedResult.changedFiles
+                        .map((file) => `- ${file}`)
+                        .join("\n")}`
+                    : `The first fileops payload did not match the real file contents, so I repaired it against the current files and executed it successfully:\n\n${retriedResult.changedFiles
+                        .map((file) => `- ${file}`)
+                        .join("\n")}`,
+                  verification.note,
+                ),
+                tokenUsage: mergeTokenUsage(repaired.tokenUsage, verification.tokenUsage),
+              },
+            ];
+            setMessages(completedMessages);
+            setStatus(
+              isChinese
+                ? `文件操作已自动修正并完成：${retriedResult.changedFiles.join(", ")}`
+                : `File operations were auto-repaired and completed: ${retriedResult.changedFiles.join(", ")}`,
+            );
+            return completedMessages;
+          } catch (retryError) {
+            const retryMessage = retryError instanceof Error ? retryError.message : "Automatic file operation retry failed";
+            const nextMessages: ChatMessage[] = [
+              ...baseMessages,
+              {
+                role: "assistant",
+                content: isChinese
+                  ? `自动文件操作第一次失败的原因是：${message}\n\n我已经基于真实文件内容自动重试过一次，但还是失败了：${retryMessage}\n\n这通常说明原文件内容、路径或改法本身还有偏差。你可以让我改成更稳的整文件覆盖写法，或者点底部工具栏里的“运行文件操作”手动确认。`
+                  : `Automatic file operations first failed with: ${message}\n\nI then retried once against the real file contents, but it still failed: ${retryMessage}\n\nThis usually means the path, original content, or edit strategy still needs adjustment. You can ask me to switch to a safer full-file overwrite approach, or click "Run file operations" in the bottom toolbar to confirm manually.`,
+              },
+            ];
+            setMessages(nextMessages);
+            setStatus(formatActionableError(retryError, "Automatic file operation retry failed"));
+            return null;
+          }
+        }
+      }
       const nextMessages: ChatMessage[] = [
         ...baseMessages,
         {
@@ -1115,11 +1330,12 @@ Novayxk already executed the commands you requested through powershell-run. You 
 - If a command failed, explain why it failed and what the next best step is.
 - If the command output is empty, truncated, not shown, or the exit code is not 0, do not claim success. Say there is not enough evidence to confirm success yet.
 - If the original user task truly requires another command, you may output a complete powershell-run block for the next step. Do not write commands as plain text, and do not claim an unexecuted command has already started.
+- Never use placeholder labels such as [powershell-run block], [text block], [json block], or similar bracketed descriptions. If you need a block, output a real fenced code block.
 - If you notice you are about to repeat a command that already ran in the previous turn or earlier turns, stop outputting commands. Summarize why the flow is stuck, what has already been tried, and how the user can verify the next step.
 - If you are only giving advice or optional actions, do not output powershell-run, fileops, or diff blocks.
 ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNote}` : ""}`,
         },
-        ...sanitizeChatHistory(baseMessages).slice(-getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
+        ...buildPromptHistorySlice(baseMessages, getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
         {
           role: "user",
           content: `Novayxk already executed the PowerShell command automatically. Please answer my original question directly instead of only repeating the raw output.\n\n${executionContent}`,
@@ -1248,6 +1464,291 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
     });
   }
 
+  function getWebSearchBaseRoundLimit(mode: AssistantMode) {
+    if (mode === "low") return 2;
+    if (mode === "deep") return 6;
+    return 4;
+  }
+
+  function getWebSearchBonusRoundLimit(mode: AssistantMode) {
+    if (mode === "low") return 1;
+    if (mode === "deep") return 3;
+    return 2;
+  }
+
+  function createWebSearchLoopState(mode: AssistantMode): WebSearchLoopState {
+    return {
+      roundsUsed: 0,
+      maxRounds: getWebSearchBaseRoundLimit(mode),
+      bonusRoundsUsed: 0,
+      bestScore: 0,
+      staleRounds: 0,
+      seenRelevantHosts: new Set<string>(),
+    };
+  }
+
+  function normalizeSearchText(value: string) {
+    return String(value ?? "")
+      .toLowerCase()
+      .replace(/[`"'“”‘’()[\]{}<>|/\\,;:!?+=_*&#@~^%-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function extractSearchTerms(value: string, limit = 12) {
+    const normalized = normalizeSearchText(value);
+    if (!normalized) return [];
+    const terms = normalized
+      .split(" ")
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 2);
+    return [...new Set(terms)].slice(0, limit);
+  }
+
+  function getWebSearchQueryDomains(request: WebSearchRequest) {
+    return (request.domains ?? [])
+      .map((entry) => entry.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, ""))
+      .filter(Boolean);
+  }
+
+  function scoreWebSearchResult(request: WebSearchRequest, userGoal: string, result: WebSearchResponse["results"][number]) {
+    const queryPhrase = normalizeSearchText(request.query);
+    const queryTerms = extractSearchTerms(request.query);
+    const goalTerms = extractSearchTerms(userGoal, 8);
+    const haystack = normalizeSearchText(
+      [
+        result.title,
+        result.url,
+        result.host,
+        result.displayedUrl,
+        result.snippet,
+        result.pageTitle,
+        result.pageDescription,
+        result.pageExcerpt,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    let score = 0;
+    if (queryPhrase && haystack.includes(queryPhrase)) score += 8;
+    for (const term of queryTerms) {
+      if (haystack.includes(term)) score += 2;
+    }
+    for (const term of goalTerms) {
+      if (haystack.includes(term)) score += 1;
+    }
+    if (result.pageTitle) score += 1;
+    if (result.pageExcerpt) score += 1;
+    if (!result.pageError && (result.pageTitle || result.pageExcerpt)) score += 1;
+    const requestDomains = getWebSearchQueryDomains(request);
+    const normalizedHost = String(result.host ?? "").trim().toLowerCase().replace(/^www\./, "");
+    if (requestDomains.some((domain) => normalizedHost === domain || normalizedHost.endsWith(`.${domain}`))) {
+      score += 2;
+    }
+    return score;
+  }
+
+  function assessWebSearchRound(
+    requests: WebSearchRequest[],
+    responses: WebSearchResponse[],
+    userGoal: string,
+    loopState: WebSearchLoopState,
+  ): WebSearchRoundAssessment {
+    let bestScore = 0;
+    let relevantResultCount = 0;
+    const newRelevantHosts = new Set<string>();
+
+    responses.forEach((response, index) => {
+      const request = requests[index];
+      if (!request) return;
+      response.results.forEach((result) => {
+        const score = scoreWebSearchResult(request, userGoal, result);
+        bestScore = Math.max(bestScore, score);
+        if (score >= 6) {
+          relevantResultCount += 1;
+          const normalizedHost = String(result.host ?? "").trim().toLowerCase();
+          if (normalizedHost && !loopState.seenRelevantHosts.has(normalizedHost)) {
+            newRelevantHosts.add(normalizedHost);
+          }
+        }
+      });
+    });
+
+    const improved =
+      bestScore >= loopState.bestScore + 2 ||
+      (bestScore >= Math.max(loopState.bestScore, 6) && newRelevantHosts.size > 0) ||
+      (loopState.bestScore === 0 && relevantResultCount > 0);
+
+    return {
+      bestScore,
+      relevantResultCount,
+      newRelevantHosts: [...newRelevantHosts],
+      improved,
+    };
+  }
+
+  function updateWebSearchLoopState(loopState: WebSearchLoopState, assessment: WebSearchRoundAssessment) {
+    loopState.roundsUsed += 1;
+    loopState.bestScore = Math.max(loopState.bestScore, assessment.bestScore);
+    assessment.newRelevantHosts.forEach((host) => loopState.seenRelevantHosts.add(host));
+    if (assessment.improved) {
+      loopState.staleRounds = 0;
+      const maxBonusRounds = getWebSearchBonusRoundLimit(assistantMode);
+      if (loopState.roundsUsed >= loopState.maxRounds && loopState.bonusRoundsUsed < maxBonusRounds) {
+        loopState.maxRounds += 1;
+        loopState.bonusRoundsUsed += 1;
+      }
+      return;
+    }
+    loopState.staleRounds += 1;
+  }
+
+  function getWebSearchStopReason(loopState: WebSearchLoopState, followUpRequests: WebSearchRequest[]) {
+    if (!followUpRequests.length) return "";
+    if (loopState.staleRounds >= WEB_SEARCH_STALE_LIMIT) {
+      return isChinese
+        ? "连续几轮搜索都没有带来更相关的结果，所以继续自动搜索的收益已经很低。"
+        : "Several search rounds in a row did not produce more relevant results, so continuing automatically is unlikely to help.";
+    }
+    if (loopState.roundsUsed >= loopState.maxRounds) {
+      return isChinese
+        ? "已经用完当前这轮自动搜索预算，但现有证据已经足够整理出一个直接回答。"
+        : "The automatic search budget for this turn was used up, but there is enough evidence to produce a direct answer.";
+    }
+    return "";
+  }
+
+  function replaceLastAssistantMessage(messagesToUpdate: ChatMessage[], content: string, tokenUsage?: TokenUsage) {
+    if (!messagesToUpdate.length) {
+      const assistantMessage: ChatMessage = { role: "assistant", content, ...(tokenUsage ? { tokenUsage } : {}) };
+      return [assistantMessage];
+    }
+    const lastMessage = messagesToUpdate[messagesToUpdate.length - 1];
+    if (lastMessage.role !== "assistant") {
+      const assistantMessage: ChatMessage = { role: "assistant", content, ...(tokenUsage ? { tokenUsage } : {}) };
+      return [...messagesToUpdate, assistantMessage];
+    }
+    return [
+      ...messagesToUpdate.slice(0, -1),
+      {
+        ...lastMessage,
+        content,
+        ...(tokenUsage ? { tokenUsage: mergeTokenUsage(lastMessage.tokenUsage, tokenUsage) } : {}),
+      },
+    ];
+  }
+
+  function buildForcedWebSearchRequest(promptText: string): WebSearchRequest {
+    const normalized = promptText.trim();
+    const request: WebSearchRequest = {
+      query: normalized,
+      maxResults: assistantMode === "deep" ? 6 : assistantMode === "low" ? 4 : 5,
+      includePageContent: true,
+      includePageContentCount: assistantMode === "deep" ? 3 : 2,
+    };
+    if (/(?:openai|gpt|chatgpt|anthropic|claude|google|gemini|microsoft|github|白宫|white house|外交部|mfa|国务院|state council)/i.test(normalized)) {
+      const domains: string[] = [];
+      if (/(?:openai|gpt|chatgpt)/i.test(normalized)) {
+        domains.push("openai.com", "developers.openai.com");
+      }
+      if (/(?:anthropic|claude)/i.test(normalized)) {
+        domains.push("anthropic.com");
+      }
+      if (/(?:google|gemini)/i.test(normalized)) {
+        domains.push("blog.google", "deepmind.google", "googleblog.com");
+      }
+      if (/(?:microsoft)/i.test(normalized)) {
+        domains.push("microsoft.com");
+      }
+      if (/(?:github)/i.test(normalized)) {
+        domains.push("github.blog", "github.com");
+      }
+      if (/(?:白宫|white house)/i.test(normalized)) {
+        domains.push("whitehouse.gov");
+      }
+      if (/(?:外交部|mfa)/i.test(normalized)) {
+        domains.push("mfa.gov.cn");
+      }
+      if (/(?:国务院|state council)/i.test(normalized)) {
+        domains.push("gov.cn");
+      }
+      if (domains.length) {
+        request.domains = [...new Set(domains)];
+      }
+    }
+    return request;
+  }
+
+  async function requestFinalWebSearchAnswer(
+    baseMessages: ChatMessage[],
+    responses: WebSearchResponse[],
+    draftSummaryContent: string,
+    stopReason: string,
+  ) {
+    const bridge = window.novayxk;
+    if (!bridge) return null;
+    const userGoal = getLatestUserGoal(baseMessages);
+    const promptMessages: ChatMessage[] = [
+      {
+        role: "system",
+        content: isChinese
+          ? `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+
+【联网搜索最终收口规则】
+你已经拿到了当前可用的真实搜索证据，现在必须直接回答用户，不能再继续搜索。
+- 不要输出 web-search、powershell-run、fileops、browser-actions 或 JSON。
+- 如果证据足够，直接给结论并引用最关键来源。
+- 如果证据不足，就明确说目前还没有可靠确认，并说明现有结果为什么不够。`
+          : `${buildSystemPrompt(memoryState?.memory ?? "", activeTaskSummary, runtimePermissionContext, assistantMode)}
+
+[Final web search synthesis rules]
+You already have the currently available real search evidence, and now you must answer the user directly without continuing the search.
+- Do not output web-search, powershell-run, fileops, browser-actions, or JSON.
+- If the evidence is enough, give the conclusion directly and cite the key sources.
+- If the evidence is not enough, say clearly that there is no reliable confirmation yet and explain why the current results are insufficient.`,
+      },
+      ...buildPromptHistorySlice(baseMessages, getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
+      {
+        role: "user",
+        content: isChinese
+          ? `原始用户目标：${userGoal || "未提供"}
+
+停止继续自动搜索的原因：${stopReason}
+
+真实搜索证据：
+${responses.map((response) => formatWebSearchResponse(response)).join("\n\n")}
+
+当前草稿或追搜意图：
+${draftSummaryContent || "无"}
+
+请直接给出最终回答。`
+          : `Original user goal: ${userGoal || "Not provided"}
+
+Reason to stop automatic continuation: ${stopReason}
+
+Real search evidence:
+${responses.map((response) => formatWebSearchResponse(response)).join("\n\n")}
+
+Current draft answer or follow-up search intent:
+${draftSummaryContent || "None"}
+
+Give the final answer directly.`,
+      },
+    ];
+
+    const rawReply = await runModelRequestWithRetries("Final built-in web search answer request", () =>
+      bridge.chat({
+        provider: activeProvider,
+        messages: promptMessages,
+      }),
+    );
+    const content = stripPrematurePowerShellResultText(normalizeAssistantToolCallContent(String(rawReply || ""))).trim();
+    return {
+      content: content || localizedTexts.noWebSearchSummary,
+      tokenUsage: buildEstimatedTokenUsage(promptMessages, content || localizedTexts.noWebSearchSummary),
+    };
+  }
+
   async function buildWebSearchVerificationSummary(
     baseMessages: ChatMessage[],
     responses: WebSearchResponse[],
@@ -1287,7 +1788,8 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
     assistantContent: string,
     baseMessages: ChatMessage[],
     seenSearches = new Set<string>(),
-    round = 1,
+    loopState = createWebSearchLoopState(assistantMode),
+    accumulatedResponses: WebSearchResponse[] = [],
   ) {
     const requests = extractWebSearchRequests(assistantContent);
     if (!requests.length) {
@@ -1318,7 +1820,7 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
     }
 
     const freshRequests: WebSearchRequest[] = [];
-    for (const request of requests.slice(0, 3)) {
+    for (const request of requests.slice(0, WEB_SEARCH_REQUESTS_PER_ROUND)) {
       const key = getWebSearchLoopKey(request);
       if (seenSearches.has(key)) continue;
       seenSearches.add(key);
@@ -1326,15 +1828,15 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
     }
 
     if (!freshRequests.length) {
-      const repeatedMessages: ChatMessage[] = [
-        ...baseMessages,
-        {
-          role: "assistant",
-          content: "Novayxk automatically stopped repeated built-in web searches because the same search request had already been executed.",
-        },
-      ];
+      const repeatedReason = isChinese
+        ? "模型又给出了已经执行过的同类搜索请求，所以我直接基于现有证据收口。"
+        : "The model repeated a search request that was already executed, so I am closing with the evidence already collected.";
+      const finalAnswer = await requestFinalWebSearchAnswer(baseMessages, accumulatedResponses, assistantContent, repeatedReason).catch(() => null);
+      const repeatedMessages = finalAnswer
+        ? replaceLastAssistantMessage(baseMessages, finalAnswer.content, finalAnswer.tokenUsage)
+        : baseMessages;
       setMessages(repeatedMessages);
-      setStatus("Repeated built-in web-search steps were detected and stopped automatically");
+      setStatus(isChinese ? "已基于现有搜索证据直接收口回答" : "Closed with the existing search evidence");
       return repeatedMessages;
     }
 
@@ -1347,6 +1849,9 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
       responses.push(response);
       resultBlocks.push(formatWebSearchResponse(response));
     }
+    const allResponses = [...accumulatedResponses, ...responses];
+    const roundAssessment = assessWebSearchRound(freshRequests, responses, getLatestUserGoal(baseMessages), loopState);
+    updateWebSearchLoopState(loopState, roundAssessment);
 
     const executionContent = `${localizedTexts.builtInWebSearchResults}\n\n\`\`\`text\n${resultBlocks.join("\n\n-----\n\n").slice(0, 22000)}\n\`\`\``;
     const nextMessages: ChatMessage[] = [
@@ -1385,7 +1890,7 @@ Novayxk already executed the built-in web search for you. You must now answer th
 - Do not output powershell-run just to search the web again unless a local command is genuinely required.
 - Do not invent article contents when a page fetch failed or was blocked.`,
         },
-        ...sanitizeChatHistory(baseMessages).slice(-getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
+        ...buildPromptHistorySlice(baseMessages, getAssistantModeProfile(assistantMode).commandSummaryHistoryLimit),
         {
           role: "user",
           content: `Novayxk already executed the built-in web search automatically. Please answer my original question directly from the real search evidence.\n\n${executionContent}`,
@@ -1423,28 +1928,28 @@ Novayxk already executed the built-in web search for you. You must now answer th
       setMessages(finalMessages);
 
       const followUpRequests = extractWebSearchRequests(finalSummaryContent);
-      if (followUpRequests.length && round < WEB_SEARCH_LOOP_LIMIT) {
-        setStatus("Detected a follow-up built-in web search step. Continuing...");
-        return executeAiWebSearch(finalSummaryContent, finalMessages, seenSearches, round + 1);
+      const stopReason = getWebSearchStopReason(loopState, followUpRequests);
+      if (followUpRequests.length && !stopReason) {
+        setStatus(
+          isChinese
+            ? `检测到更细的后续搜索线索，继续第 ${loopState.roundsUsed + 1} 轮自动联网搜索...`
+            : `Detected a more targeted follow-up search lead. Continuing with web search round ${loopState.roundsUsed + 1}...`,
+        );
+        return executeAiWebSearch(finalSummaryContent, finalMessages, seenSearches, loopState, allResponses);
       }
-      if (followUpRequests.length) {
-        const safetyMessages: ChatMessage[] = [
-          ...finalMessages,
-          {
-            role: "assistant",
-            content:
-              "Novayxk triggered the built-in web-search safety fuse because there were too many consecutive search rounds. Automatic continuation was stopped to avoid getting stuck in repeated lookups.",
-          },
-        ];
-        setMessages(safetyMessages);
-        setStatus("Too many consecutive built-in web-search steps triggered the safety fuse");
-        return safetyMessages;
+      if (followUpRequests.length && stopReason) {
+        const finalAnswer = await requestFinalWebSearchAnswer(finalMessages, allResponses, finalSummaryContent, stopReason).catch(() => null);
+        if (finalAnswer) {
+          finalMessages = replaceLastAssistantMessage(finalMessages, finalAnswer.content, finalAnswer.tokenUsage);
+          setMessages(finalMessages);
+        }
+        setStatus(isChinese ? "已基于当前联网搜索证据直接收口回答" : "Closed with the current web search evidence");
       }
 
       const verification = await buildWebSearchVerificationSummary(
         baseMessages,
-        responses,
-        finalSummaryContent || localizedTexts.noWebSearchSummary,
+        allResponses,
+        finalMessages[finalMessages.length - 1]?.content || finalSummaryContent || localizedTexts.noWebSearchSummary,
       );
       if (verification.note) {
         const lastMessage = finalMessages[finalMessages.length - 1];
@@ -1566,7 +2071,7 @@ Novayxk has just completed one round of browser-actions. Decide from the latest 
 - Do not repeat the exact same click or input sequence from the previous round unless you are only waiting briefly for the page to change.
 - Return at most 1 to 3 closely connected actions at a time.`,
       },
-      ...sanitizeChatHistory(baseMessages).slice(-getAssistantModeProfile(assistantMode).continuationHistoryLimit),
+      ...buildPromptHistorySlice(baseMessages, getAssistantModeProfile(assistantMode).continuationHistoryLimit),
       {
         role: "user",
         content: `Novayxk completed browser action round ${roundIndex}.
@@ -1939,15 +2444,25 @@ Please decide whether another step is needed now.`,
     const projectContext = contextMode === "full" ? await buildProjectContextForPrompt(trimmed) : "";
     const browserContext = await buildBrowserContextForPrompt(trimmed);
     const selectedFileContext = contextMode === "full" && selectedFile?.kind === "text"
-      ? `\n\nCurrent selected file: ${selectedFile.path}\n\`\`\`\n${selectedFile.content.slice(0, assistantModeProfile.selectedFileLimit)}\n\`\`\``
+      ? `\n\nCurrent selected file: ${selectedFile.path}\n\`\`\`\n${compactPromptText(selectedFile.content, assistantModeProfile.selectedFileLimit)}\n\`\`\``
       : "";
     const runtimeContext = contextMode === "runtime" && project
-      ? `\n\nRuntime context: the current project root is ${project.root}. If a command needs to be executed, it will run in this directory. Do not repeat this path unless it is necessary.`
+      ? `\n\n${compactPromptText(
+          `Runtime context: the current project root is ${project.root}. If a command needs to be executed, it will run in this directory. Do not repeat this path unless it is necessary.`,
+          220,
+        )}`
       : "";
     const lightPlanContext =
       userIntent.needsLightPlan
-        ? "\n\nLight planning rule: if this turn is clearly multi-step, involves inspect-then-summarize, debug-then-fix, or needs a structure that prevents losing track halfway through, you may first organize the answer into 2 to 4 ultra-short steps. But the same reply must immediately continue with completed observations, conclusions, code, commands, or the next action. Do not stop at only the plan or a lead-in."
+        ? `\n\n${compactPromptText(
+            "Light planning rule: if this turn is clearly multi-step, involves inspect-then-summarize, debug-then-fix, or needs a structure that prevents losing track halfway through, you may first organize the answer into 2 to 4 ultra-short steps. But the same reply must immediately continue with completed observations, conclusions, code, commands, or the next action. Do not stop at only the plan or a lead-in.",
+            260,
+          )}`
         : "";
+    const shouldStartWithForcedWebSearch =
+      userIntent.shouldForceWebSearch &&
+      shouldForceBuiltInWebSearch(trimmed) &&
+      !/(?:```(?:web-search|powershell-run|fileops|browser-actions)\n)/i.test(trimmed);
 
     let streamedContent = "";
     let requestMessages: ChatMessage[] = [];
@@ -1974,6 +2489,26 @@ Please decide whether another step is needed now.`,
           assistantMode,
         ),
       ];
+
+      if (shouldStartWithForcedWebSearch) {
+        const forcedSearchRequest = buildForcedWebSearchRequest(trimmed);
+        const forcedSearchContent = `\`\`\`web-search\n${JSON.stringify(forcedSearchRequest, null, 2)}\n\`\`\``;
+        const forcedSearchMessages: ChatMessage[] = [
+          ...nextMessages,
+          {
+            role: "assistant",
+            content: forcedSearchContent,
+            elapsedMs: Date.now() - responseStartedAt,
+            tokenUsage: buildEstimatedTokenUsage(requestMessages, forcedSearchContent),
+          },
+        ];
+        setMessages(forcedSearchMessages);
+        await waitForUiCommit();
+        const forcedWebSearchMessages = await executeAiWebSearch(forcedSearchContent, forcedSearchMessages);
+        await saveCurrentTask(forcedWebSearchMessages ?? forcedSearchMessages);
+        setStatus("Built-in web search completed and a conclusion was generated");
+        return;
+      }
 
       setMessages([...nextMessages, { role: "assistant", content: "" }]);
       await runModelRequestWithRetries("Model request", async () => {

@@ -25,6 +25,7 @@ import {
   isLikelyIncompleteAssistantReply,
   shouldAutoInspectCurrentMachine,
   shouldAutoExecutePowerShellForPrompt,
+  shouldForceBuiltInWebSearch,
 } from "../policy";
 
 describe("AI chat parsing guards", () => {
@@ -96,15 +97,16 @@ describe("AI chat parsing guards", () => {
       "low",
     );
 
-    expect(history.map((message) => message.content)).toEqual(["a1", "u2", "a2", "u3", "a3"]);
+    expect(history.map((message) => message.content)).toEqual(["u2", "a2", "u3", "a3"]);
   });
 
   it("keeps low mode compact but less fragile for complex tasks", () => {
     const profile = getAssistantModeProfile("low");
 
-    expect(profile.historyLimitWithContext).toBe(6);
-    expect(profile.projectRelatedFileLimit).toBe(4);
-    expect(profile.projectRelatedContentLimit).toBe(5000);
+    expect(profile.historyLimitWithContext).toBe(5);
+    expect(profile.projectRelatedFileLimit).toBe(2);
+    expect(profile.projectRelatedContentLimit).toBe(1400);
+    expect(profile.latestContextLimit).toBe(3200);
   });
 
   it("keeps low and standard modes focused on solving the problem", () => {
@@ -314,7 +316,10 @@ describe("AI chat parsing guards", () => {
     expect(getUserIntentProfile("卸载了吧把它").kind).toBe("execute");
     expect(getUserIntentProfile("查看一下我的电脑有uu加速器吗").autoExecutePowerShell).toBe(true);
     expect(getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下").needsLightPlan).toBe(true);
+    expect(getUserIntentProfile("你如何看待前两天特朗普访华").shouldForceWebSearch).toBe(true);
+    expect(getUserIntentProfile("什么是 WSL").shouldForceWebSearch).toBe(false);
     expect(buildUserIntentInstruction(getUserIntentProfile("什么是 WSL"))).toContain("Task type");
+    expect(buildUserIntentInstruction(getUserIntentProfile("你如何看待前两天特朗普访华"))).toContain("built-in web search evidence is required");
   });
 
   it("recognizes local machine inspection tasks that should auto-check", () => {
@@ -373,6 +378,7 @@ describe("AI chat parsing guards", () => {
     const inspectProfile = getUserIntentProfile("查看一下我的电脑有uu加速器吗");
     const executeProfile = getUserIntentProfile("帮我卸载丁丁");
     const projectInspectProfile = getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下");
+    const knowledgeProfile = getUserIntentProfile("你如何看待前两天特朗普访华");
 
     expect(isLikelyIncompleteAssistantReply("帮你查一下电脑里有没有安装 UU 加速器（网易 UU）：", inspectProfile)).toBe(true);
     expect(
@@ -435,11 +441,43 @@ describe("AI chat parsing guards", () => {
         executeProfile,
       ),
     ).toBe(false);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "我需要先查一下这个消息是否属实，因为我不确定特朗普最近是否有访华的行程。",
+        knowledgeProfile,
+      ),
+    ).toBe(true);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "让我搜索一下。",
+        getUserIntentProfile("你知道Fable吗，我说的是Anthropic 新模型 Fable，你不知道的话你就上网去搜"),
+      ),
+    ).toBe(true);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "Fable 这个名字现在有点歧义，公开语境里可能指不同项目。要是你说的是 Anthropic 的新模型线，我目前没有看到足够可靠的官方资料能确认它已经正式发布，所以更稳妥的做法是先查官方来源再下结论。",
+        knowledgeProfile,
+      ),
+    ).toBe(false);
+    expect(
+      isLikelyIncompleteAssistantReply(
+        "```web-search\n{\"query\":\"Anthropic Fable model official\",\"domains\":[\"anthropic.com\"],\"maxResults\":5,\"includePageContent\":true}\n```",
+        knowledgeProfile,
+      ),
+    ).toBe(false);
   });
 
   it("treats explicit online-search requests as executable inspection", () => {
     const profile = getUserIntentProfile("你知道Fable吗，我说的是Anthropic 新模型 Fable，你不知道的话你就上网去搜");
     expect(profile.autoExecutePowerShell).toBe(true);
     expect(profile.kind).toBe("execute");
+  });
+
+  it("forces built-in web search for time-sensitive or fact-sensitive web questions", () => {
+    expect(shouldForceBuiltInWebSearch("你如何看待前两天特朗普访华")).toBe(true);
+    expect(shouldForceBuiltInWebSearch("OpenAI 最新发布了什么模型")).toBe(true);
+    expect(shouldForceBuiltInWebSearch("你知道Fable吗，不知道的话你就上网搜一下")).toBe(true);
+    expect(shouldForceBuiltInWebSearch("帮我搜索一下怎么安装 Python")).toBe(false);
+    expect(shouldForceBuiltInWebSearch("什么是 WSL")).toBe(false);
   });
 });

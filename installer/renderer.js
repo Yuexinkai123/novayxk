@@ -288,6 +288,7 @@ const state = {
   installing: false,
   completed: false,
   lastProgress: null,
+  lastErrorMessage: "",
 };
 
 const elements = {
@@ -463,6 +464,9 @@ function setLanguage(nextLanguage) {
   if (state.language === nextLanguage) return;
   state.language = nextLanguage === "zh-CN" ? "zh-CN" : "en";
   applyModeCopy();
+  if (state.lastErrorMessage) {
+    elements.errorText.textContent = normalizeInstallerError(state.lastErrorMessage);
+  }
   render();
 }
 
@@ -735,11 +739,13 @@ function render() {
 }
 
 function clearError() {
+  state.lastErrorMessage = "";
   elements.errorText.textContent = "";
 }
 
 function showError(message) {
-  elements.errorText.textContent = message;
+  state.lastErrorMessage = String(message || "");
+  elements.errorText.textContent = normalizeInstallerError(state.lastErrorMessage);
 }
 
 function normalizeInstallerError(message) {
@@ -750,7 +756,7 @@ function normalizeInstallerError(message) {
 
   if (!cleaned) return getCopy().shared.actionFailed;
 
-  if (/安装目录正在被占用|INSTALL_DIR_BUSY|EBUSY|EPERM|EACCES/i.test(cleaned)) {
+  if (/安装目录正在被占用|INSTALL_DIR_BUSY|install directory is currently in use|previous version cannot be replaced yet|EBUSY|EPERM|EACCES/i.test(cleaned)) {
     return getCopy().errors.busy;
   }
 
