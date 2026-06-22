@@ -1,6 +1,6 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { BookOpen, Bot, Brain, ChevronsRight, Copy, ExternalLink, Gauge, History, Image as ImageIcon, KeyRound, Leaf, Pencil, Plus, RotateCcw, Save, Send, Square, X } from "lucide-react";
+import { BookOpen, Brain, ChevronsRight, Copy, ExternalLink, Gauge, Image as ImageIcon, Leaf, Pencil, Plus, RotateCcw, Send, Square, X } from "lucide-react";
 import type { AppLanguage, AssistantMode, ChatMessage, GeneratedImageAttachment, TaskSummary } from "../../vite-env";
 import { formatElapsedSeconds } from "../../ai/providers";
 import { formatTaskLabel, stripContext } from "../../ai/chat";
@@ -18,10 +18,7 @@ type AssistantPanelProps = {
   hasProject: boolean;
   isModelReady: boolean;
   activeTaskId: string | null;
-  activeTaskTitle: string;
-  activeTask: TaskSummary | null;
   tasks: TaskSummary[];
-  projectMemoryLength: number;
   messages: ChatMessage[];
   isLoading: boolean;
   loadingElapsedMs: number;
@@ -34,10 +31,7 @@ type AssistantPanelProps = {
   onCollapse: () => void;
   onLoadTask: (taskId: string) => void;
   onStartNewTask: () => void;
-  onSaveCurrentTask: () => void;
   onOpenMemory: () => void;
-  onTaskTitleChange: (title: string) => void;
-  onTaskTitleBlur: () => void;
   onPromptChange: (prompt: string) => void;
   onSendMessage: (promptOverride?: string) => void;
   onAssistantModeChange: (mode: AssistantMode) => void | Promise<void>;
@@ -53,10 +47,7 @@ export function AssistantPanel({
   hasProject,
   isModelReady,
   activeTaskId,
-  activeTaskTitle,
-  activeTask,
   tasks,
-  projectMemoryLength,
   messages,
   isLoading,
   loadingElapsedMs,
@@ -69,10 +60,7 @@ export function AssistantPanel({
   onCollapse,
   onLoadTask,
   onStartNewTask,
-  onSaveCurrentTask,
   onOpenMemory,
-  onTaskTitleChange,
-  onTaskTitleBlur,
   onPromptChange,
   onSendMessage,
   onAssistantModeChange,
@@ -143,17 +131,10 @@ export function AssistantPanel({
 
   return (
     <aside className="assistant-panel" aria-hidden={isCollapsed}>
-      <div className="panel-heading">
-        <div>
-          {/* <span>助手</span> */}
+      <div className="panel-heading assistant-toolbar">
+        <div className="assistant-model-label">
           <strong>{model}</strong>
         </div>
-        <button className="panel-collapse-button" onClick={onCollapse} title={strings.hidePanel}>
-          <ChevronsRight size={15} />
-        </button>
-      </div>
-
-      <div className="task-strip">
         <div className="task-row">
           <select
             className="task-select"
@@ -172,17 +153,6 @@ export function AssistantPanel({
               </option>
             ))}
           </select>
-          <input
-            className="task-title-input"
-            value={activeTaskTitle}
-            onChange={(event) => onTaskTitleChange(event.target.value)}
-            onBlur={onTaskTitleBlur}
-            disabled={!hasProject}
-            aria-label={strings.taskTitle}
-          />
-          <button className="task-icon-button" onClick={onSaveCurrentTask} disabled={!hasProject} title={strings.saveTask}>
-            <Save size={15} />
-          </button>
           <button className="task-icon-button" onClick={onStartNewTask} disabled={!hasProject} title={strings.createNewTask}>
             <Plus size={15} />
           </button>
@@ -190,20 +160,14 @@ export function AssistantPanel({
             <BookOpen size={15} />
           </button>
         </div>
-        <div className="task-meta">
-          <History size={13} />
-          <span>
-            {activeTask
-              ? `${activeTask.messageCount} ${strings.messages} / ${tasks.length} ${strings.savedTasks}`
-              : `${projectMemoryLength} ${strings.projectMemoryChars}`}
-          </span>
-        </div>
+        <button className="panel-collapse-button" onClick={onCollapse} title={strings.hidePanel}>
+          <ChevronsRight size={15} />
+        </button>
       </div>
 
       <div className="chat-list" ref={chatListRef}>
         {messages.map((message, index) => (
           <article key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
-            <div className="avatar">{message.role === "assistant" ? <Bot size={16} /> : <KeyRound size={16} />}</div>
             <div className="message-body">
               {message.role === "user" && index === lastUserMessageIndex ? (
                 <button
@@ -226,9 +190,6 @@ export function AssistantPanel({
         ))}
         {isLoading && (
           <article className="chat-message assistant">
-            <div className="avatar">
-              <Bot size={16} />
-            </div>
             <div className="message-body">
               <MarkdownView content={strings.working} language={language} />
               <div className="message-meta">{strings.elapsed} {formatElapsedSeconds(loadingElapsedMs)}</div>

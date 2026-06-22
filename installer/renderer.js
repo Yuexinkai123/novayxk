@@ -3,7 +3,6 @@ const api = window.novayxkInstaller;
 const COPY = {
   en: {
     shared: {
-      languageSwitch: "Installer language",
       minimize: "Minimize",
       close: "Close",
       stepIndicator: "Installation steps",
@@ -143,7 +142,6 @@ const COPY = {
   },
   "zh-CN": {
     shared: {
-      languageSwitch: "安装器语言",
       minimize: "最小化",
       close: "关闭",
       stepIndicator: "安装步骤",
@@ -337,9 +335,6 @@ const elements = {
   secondaryButton: document.querySelector("#secondaryButton"),
   minimizeButton: document.querySelector("#minimizeButton"),
   closeButton: document.querySelector("#closeButton"),
-  languageEnglishButton: document.querySelector("#languageEnglishButton"),
-  languageChineseButton: document.querySelector("#languageChineseButton"),
-  languageSwitch: document.querySelector("#languageSwitch"),
   stepIndicator: document.querySelector("#stepIndicator"),
   errorText: document.querySelector("#errorText"),
   progressTitle: document.querySelector("#progressTitle"),
@@ -392,9 +387,6 @@ function bindEvents() {
     }
     api.close();
   });
-
-  elements.languageEnglishButton.addEventListener("click", () => setLanguage("en"));
-  elements.languageChineseButton.addEventListener("click", () => setLanguage("zh-CN"));
 
   elements.browseButton.addEventListener("click", async () => {
     if (state.installing || state.mode !== "install") return;
@@ -460,16 +452,6 @@ function getCopy() {
   return COPY[state.language] || COPY.en;
 }
 
-function setLanguage(nextLanguage) {
-  if (state.language === nextLanguage) return;
-  state.language = nextLanguage === "zh-CN" ? "zh-CN" : "en";
-  applyModeCopy();
-  if (state.lastErrorMessage) {
-    elements.errorText.textContent = normalizeInstallerError(state.lastErrorMessage);
-  }
-  render();
-}
-
 function applyModeCopy() {
   const copy = getCopy();
   const modeCopy = state.mode === "uninstall" ? copy.uninstall : copy.install;
@@ -518,7 +500,6 @@ function applyModeCopy() {
   elements.deleteDataOptionTitle.textContent = copy.uninstall.deleteDataOptionTitle;
   elements.deleteDataOptionBody.textContent = copy.uninstall.deleteDataOptionBody;
 
-  elements.languageSwitch.setAttribute("aria-label", copy.shared.languageSwitch);
   elements.stepIndicator.setAttribute("aria-label", copy.shared.stepIndicator);
   elements.minimizeButton.setAttribute("aria-label", copy.shared.minimize);
   elements.closeButton.setAttribute("aria-label", copy.shared.close);
@@ -526,9 +507,6 @@ function applyModeCopy() {
   elements.openInstallDirButton.textContent = state.mode === "uninstall" ? copy.shared.viewFolder : copy.shared.openFolder;
   elements.openUserDataDirButton.textContent = copy.shared.openFolder;
   elements.progressPathLabel.textContent = copy.shared.targetPath;
-
-  elements.languageEnglishButton.classList.toggle("active", state.language === "en");
-  elements.languageChineseButton.classList.toggle("active", state.language === "zh-CN");
 
   elements.installDir.readOnly = state.mode === "uninstall";
   elements.installDir.disabled = false;

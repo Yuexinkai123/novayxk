@@ -19,6 +19,10 @@ import {
   stripInjectedContext,
 } from "./chat";
 import {
+  buildGenericWebSearchFallbackQueries,
+  normalizeWebSearchQueryForFallback,
+} from "../hooks/useAiAssistant";
+import {
   buildCommandResultJudgementNote,
   buildUserIntentInstruction,
   getUserIntentProfile,
@@ -172,14 +176,14 @@ describe("AI chat parsing guards", () => {
 
   it("converts JSON tool_call payloads and strips tool_result noise", () => {
     const normalized = normalizeAssistantToolCallContent(
-      '先帮你查一下。<tool_call>\n{"name":"powershell-run","arguments":{"command":"winget list Tencent.QQLive"}}\n</tool_call>\n<tool_result>\n已找到 腾讯视频\n</tool_result>\n已经帮你搞定了',
+      '先帮你查一下。<tool_call>\n{"name":"powershell-run","arguments":{"command":"winget list Example.App"}}\n</tool_call>\n<tool_result>\n已找到示例应用\n</tool_result>\n已经帮你搞定了',
     );
 
     expect(normalized).toContain("先帮你查一下");
     expect(normalized).toContain("```powershell-run");
-    expect(normalized).toContain("winget list Tencent.QQLive");
+    expect(normalized).toContain("winget list Example.App");
     expect(normalized).not.toContain("<tool_result>");
-    expect(normalized).not.toContain("已找到 腾讯视频");
+    expect(normalized).not.toContain("已找到示例应用");
     expect(normalized).not.toContain("已经帮你搞定了");
   });
 
@@ -205,13 +209,13 @@ describe("AI chat parsing guards", () => {
 
   it("extracts bare fileops json without fences", () => {
     const operations = extractFileOps(
-      '我来直接改。\n\n[{"type":"replace","path":"hospital.html","search":"</style>","replace":"<style>body{color:red;}</style>"},{"type":"write","path":"notes.txt","content":"done"}]',
+      '我来直接改。\n\n[{"type":"replace","path":"landing.html","search":"</style>","replace":"<style>body{color:red;}</style>"},{"type":"write","path":"notes.txt","content":"done"}]',
     );
 
     expect(operations).toEqual([
       {
         type: "replace",
-        path: "hospital.html",
+        path: "landing.html",
         search: "</style>",
         replace: "<style>body{color:red;}</style>",
       },
@@ -310,20 +314,20 @@ describe("AI chat parsing guards", () => {
 
   it("classifies intent and gives the model a matching instruction", () => {
     expect(getUserIntentProfile("什么是 WSL").kind).toBe("knowledge");
-    expect(getUserIntentProfile("我电脑上是不是有 uu 加速器").kind).toBe("inspect");
+    expect(getUserIntentProfile("我电脑上是不是有某个加速器").kind).toBe("inspect");
     expect(getUserIntentProfile("我怎么从登录页面到这里的你能看到吗，掉了什么api啥的").kind).toBe("inspect");
     expect(getUserIntentProfile("帮我查一下当前装了哪些 WSL 发行版").kind).toBe("execute");
     expect(getUserIntentProfile("卸载了吧把它").kind).toBe("execute");
-    expect(getUserIntentProfile("查看一下我的电脑有uu加速器吗").autoExecutePowerShell).toBe(true);
+    expect(getUserIntentProfile("查看一下我的电脑有某个加速器吗").autoExecutePowerShell).toBe(true);
     expect(getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下").needsLightPlan).toBe(true);
-    expect(getUserIntentProfile("你如何看待前两天特朗普访华").shouldForceWebSearch).toBe(true);
+    expect(getUserIntentProfile("你如何看待前两天某国总统访问邻国").shouldForceWebSearch).toBe(true);
     expect(getUserIntentProfile("什么是 WSL").shouldForceWebSearch).toBe(false);
     expect(buildUserIntentInstruction(getUserIntentProfile("什么是 WSL"))).toContain("Task type");
-    expect(buildUserIntentInstruction(getUserIntentProfile("你如何看待前两天特朗普访华"))).toContain("built-in web search evidence is required");
+    expect(buildUserIntentInstruction(getUserIntentProfile("你如何看待前两天某国总统访问邻国"))).toContain("built-in web search evidence is required");
   });
 
   it("recognizes local machine inspection tasks that should auto-check", () => {
-    expect(shouldAutoInspectCurrentMachine("查看一下我的电脑有uu加速器吗")).toBe(true);
+    expect(shouldAutoInspectCurrentMachine("查看一下我的电脑有某个加速器吗")).toBe(true);
     expect(shouldAutoInspectCurrentMachine("看一下当前系统有没有装 python")).toBe(true);
     expect(shouldAutoInspectCurrentMachine("看看这个概念是什么意思")).toBe(false);
   });
@@ -336,7 +340,7 @@ describe("AI chat parsing guards", () => {
         code: null,
       },
       {
-        command: "Get-ItemProperty HKLM:\\... | Where-Object { $_.DisplayName -like \"*UU*\" }",
+        command: "Get-ItemProperty HKLM:\\... | Where-Object { $_.DisplayName -like \"*Example*\" }",
         output: "",
         code: 0,
       },
@@ -375,12 +379,12 @@ describe("AI chat parsing guards", () => {
   });
 
   it("detects action replies that stop at a half sentence", () => {
-    const inspectProfile = getUserIntentProfile("查看一下我的电脑有uu加速器吗");
-    const executeProfile = getUserIntentProfile("帮我卸载丁丁");
+    const inspectProfile = getUserIntentProfile("查看一下我的电脑有某个加速器吗");
+    const executeProfile = getUserIntentProfile("帮我卸载那个聊天软件");
     const projectInspectProfile = getUserIntentProfile("看一下我的项目，然后先别改代码，看完后总结一下");
-    const knowledgeProfile = getUserIntentProfile("你如何看待前两天特朗普访华");
+    const knowledgeProfile = getUserIntentProfile("你如何看待前两天某家公司发布新模型");
 
-    expect(isLikelyIncompleteAssistantReply("帮你查一下电脑里有没有安装 UU 加速器（网易 UU）：", inspectProfile)).toBe(true);
+    expect(isLikelyIncompleteAssistantReply("帮你查一下电脑里有没有安装这个加速器：", inspectProfile)).toBe(true);
     expect(
       isLikelyIncompleteAssistantReply(
         "能看到！让我把完整的轨迹读出来，帮你梳理从登录到现在的完整流程。",
@@ -431,53 +435,78 @@ describe("AI chat parsing guards", () => {
     ).toBe(false);
     expect(
       isLikelyIncompleteAssistantReply(
-        "```powershell-run\nwinget list --id Tencent.QQLive\n```",
+        "```powershell-run\nwinget list --id Example.App\n```",
         inspectProfile,
       ),
     ).toBe(false);
     expect(
       isLikelyIncompleteAssistantReply(
-        "你说的“丁丁”是指钉钉（DingTalk）吗？确认一下我帮你搜。",
+        "你说的“那个聊天软件”是指某个具体应用吗？确认一下我帮你搜。",
         executeProfile,
       ),
     ).toBe(false);
     expect(
       isLikelyIncompleteAssistantReply(
-        "我需要先查一下这个消息是否属实，因为我不确定特朗普最近是否有访华的行程。",
+        "我需要先查一下这个消息是否属实，因为我不确定最近是否有这项访问行程。",
         knowledgeProfile,
       ),
     ).toBe(true);
     expect(
       isLikelyIncompleteAssistantReply(
         "让我搜索一下。",
-        getUserIntentProfile("你知道Fable吗，我说的是Anthropic 新模型 Fable，你不知道的话你就上网去搜"),
+        getUserIntentProfile("你知道某个新模型代号吗，不知道的话你就上网去搜"),
       ),
     ).toBe(true);
     expect(
       isLikelyIncompleteAssistantReply(
-        "Fable 这个名字现在有点歧义，公开语境里可能指不同项目。要是你说的是 Anthropic 的新模型线，我目前没有看到足够可靠的官方资料能确认它已经正式发布，所以更稳妥的做法是先查官方来源再下结论。",
+        "这个名字现在有点歧义，公开语境里可能指不同项目。要是你说的是某家公司新模型线，我目前没有看到足够可靠的官方资料能确认它已经正式发布，所以更稳妥的做法是先查官方来源再下结论。",
         knowledgeProfile,
       ),
     ).toBe(false);
     expect(
       isLikelyIncompleteAssistantReply(
-        "```web-search\n{\"query\":\"Anthropic Fable model official\",\"domains\":[\"anthropic.com\"],\"maxResults\":5,\"includePageContent\":true}\n```",
+        "```web-search\n{\"query\":\"new model codename official announcement\",\"maxResults\":5,\"includePageContent\":true}\n```",
         knowledgeProfile,
       ),
     ).toBe(false);
   });
 
   it("treats explicit online-search requests as executable inspection", () => {
-    const profile = getUserIntentProfile("你知道Fable吗，我说的是Anthropic 新模型 Fable，你不知道的话你就上网去搜");
+    const profile = getUserIntentProfile("你知道某个新模型代号吗，不知道的话你就上网去搜");
     expect(profile.autoExecutePowerShell).toBe(true);
     expect(profile.kind).toBe("execute");
   });
 
   it("forces built-in web search for time-sensitive or fact-sensitive web questions", () => {
+    expect(shouldForceBuiltInWebSearch("你如何看待前两天某国总统访问邻国")).toBe(true);
     expect(shouldForceBuiltInWebSearch("你如何看待前两天特朗普访华")).toBe(true);
-    expect(shouldForceBuiltInWebSearch("OpenAI 最新发布了什么模型")).toBe(true);
-    expect(shouldForceBuiltInWebSearch("你知道Fable吗，不知道的话你就上网搜一下")).toBe(true);
+    expect(shouldForceBuiltInWebSearch("某家公司最新发布了什么模型")).toBe(true);
+    expect(shouldForceBuiltInWebSearch("你知道某个新模型代号吗，不知道的话你就上网搜一下")).toBe(true);
     expect(shouldForceBuiltInWebSearch("帮我搜索一下怎么安装 Python")).toBe(false);
     expect(shouldForceBuiltInWebSearch("什么是 WSL")).toBe(false);
+  });
+
+  it("normalizes fragile web search queries before fallback searches", () => {
+    expect(normalizeWebSearchQueryForFallback("某国总统 访问邻国 2025年11月 最新消息")).toBe("某国总统 访问邻国 最新消息");
+    expect(normalizeWebSearchQueryForFallback("前两天特朗普访华 2025")).toBe("特朗普访华");
+    expect(
+      buildGenericWebSearchFallbackQueries("你如何看待前两天某国总统访问邻国", {
+        query: "某国总统 访问邻国 2025年11月 最新消息",
+        domains: ["reuters.com", "bbc.com"],
+      }),
+    ).toEqual([
+      "某国总统访问邻国",
+      `某国总统访问邻国 ${new Date().getFullYear()}`,
+      `某国总统访问邻国 official news ${new Date().getFullYear()}`,
+    ]);
+    expect(
+      buildGenericWebSearchFallbackQueries("你如何看待前两天特朗普访华", {
+        query: "特朗普访华 2025",
+      }),
+    ).toEqual([
+      "特朗普访华",
+      `特朗普访华 ${new Date().getFullYear()}`,
+      `特朗普访华 official news ${new Date().getFullYear()}`,
+    ]);
   });
 });

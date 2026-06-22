@@ -40,6 +40,7 @@ export type WorkspaceLayoutConfig = {
 };
 
 export type AppConfig = {
+  appVersion?: string;
   providers: ProviderConfig[];
   activeProviderId: string | null;
   lastProjectRoot?: string | null;
@@ -304,6 +305,8 @@ export type BrowserRemoteRequest =
     };
 
 declare global {
+  const __NOVAYXK_APP_VERSION__: string;
+
   interface Window {
     novayxk?: {
       initialConfig?: Partial<AppConfig>;

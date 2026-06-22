@@ -1804,9 +1804,14 @@ ipcMain.handle("memory:loadTask", async (_event, taskId) => {
 
 ipcMain.on("config:getInitialSync", (event) => {
   try {
-    event.returnValue = readConfigSync();
+    event.returnValue = {
+      ...readConfigSync(),
+      appVersion: app.getVersion(),
+    };
   } catch {
-    event.returnValue = {};
+    event.returnValue = {
+      appVersion: app.getVersion(),
+    };
   }
 });
 ipcMain.handle("config:get", readConfig);

@@ -65,7 +65,7 @@ function createWebSearchService({ logApp = () => {}, logError = () => {} } = {})
 
       const response = {
         query,
-        engine: "bing",
+        engine: "duckduckgo-lite",
         searchedAt: new Date().toISOString(),
         resultCount: selectedResults.length,
         pageFetchCount: selectedResults.filter((result) => result.pageTitle || result.pageDescription || result.pageExcerpt).length,

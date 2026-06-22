@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronsUp, Code2, Save, Search, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ChevronsUp, Code2, Save, ShieldCheck, TriangleAlert } from "lucide-react";
 import type { AiControlMode, AppLanguage } from "../../vite-env";
 import type { ProjectSelectedFile } from "../../vite-env";
 import type { WorkspaceGuideKind } from "../../app/workspaceGuide";
@@ -14,14 +14,9 @@ type EditorPaneProps = {
     lines: number;
     characters: number;
   };
-  editorFind: string;
-  editorFindMatches: number;
-  isWordWrapEnabled: boolean;
   isBottomCollapsed: boolean;
   aiControlMode: AiControlMode;
   workspaceGuideKind: Exclude<WorkspaceGuideKind, null> | null;
-  onEditorFindChange: (value: string) => void;
-  onToggleWordWrap: () => void;
   onShowBottomPanel: () => void;
   onSaveSelectedFile: () => void;
   onOpenSettings: () => void;
@@ -36,14 +31,9 @@ export function EditorPane({
   selectedFile,
   isEditorDirty,
   stats,
-  editorFind,
-  editorFindMatches,
-  isWordWrapEnabled,
   isBottomCollapsed,
   aiControlMode,
   workspaceGuideKind,
-  onEditorFindChange,
-  onToggleWordWrap,
   onShowBottomPanel,
   onSaveSelectedFile,
   onOpenSettings,
@@ -69,26 +59,6 @@ export function EditorPane({
           <strong>{selectedFile ? `${selectedFile.path}${isEditorDirty ? " *" : ""}` : strings.noFileSelected}</strong>
         </div>
         <div className="editor-header-actions">
-          {isTextFile && (
-            <div className="editor-find">
-              <Search size={13} />
-              <input
-                value={editorFind}
-                onChange={(event) => onEditorFindChange(event.target.value)}
-                placeholder={strings.find}
-                aria-label={strings.findLabel}
-              />
-              <span>{editorFind ? editorFindMatches : stats.lines}</span>
-            </div>
-          )}
-          <button
-            className={`editor-tool-button ${isWordWrapEnabled ? "active" : ""}`}
-            onClick={onToggleWordWrap}
-            disabled={!isTextFile}
-            title={strings.toggleWordWrap}
-          >
-            {strings.wrap}
-          </button>
           {isBottomCollapsed && (
             <button className="panel-collapse-button" onClick={onShowBottomPanel} title={strings.showBottomTools}>
               <ChevronsUp size={15} />
@@ -113,7 +83,7 @@ export function EditorPane({
                 {Array.from({ length: stats.lines }, (_, index) => index + 1).join("\n")}
               </pre>
               <textarea
-                className={`code-editor ${isWordWrapEnabled ? "wrap" : ""}`}
+                className="code-editor"
                 value={selectedFile.content}
                 spellCheck={false}
                 onChange={(event) => onSelectedFileContentChange(event.target.value)}
@@ -121,7 +91,6 @@ export function EditorPane({
               />
               <div className="editor-stats">
                 {stats.lines} {strings.lines} · {stats.characters} {strings.characters}
-                {editorFind ? ` · ${editorFindMatches} ${strings.matches}` : ""}
               </div>
             </div>
           ) : isImageFile ? (

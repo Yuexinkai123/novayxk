@@ -321,8 +321,8 @@ async function listProviderModels(provider, options = {}) {
 }
 
 function getProviderProfile(provider) {
-  const source = `${provider?.name || ""} ${provider?.baseUrl || ""} ${provider?.model || ""}`;
-  if (/xiaomimimo|mimo-v2|mimo-v/i.test(source)) return "mimo";
+  const source = `${provider?.name || ""} ${provider?.baseUrl || ""}`;
+  if (/xiaomimimo|mimo\.mi|mimo-api|mimo\.xiaomi/i.test(source)) return "mimo";
   return "openai-compatible";
 }
 

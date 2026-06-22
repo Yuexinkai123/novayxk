@@ -22,6 +22,7 @@ type SettingsModalProps = {
   providerModelStatus: string;
   isLoadingProviderModels: boolean;
   browserShowAdvancedControls: boolean;
+  appVersion?: string;
   privilege: PrivilegeState | null;
   isRestartingAsAdmin: boolean;
   onSelectProvider: (providerId: string) => void;
@@ -48,6 +49,7 @@ export function SettingsModal({
   providerModelStatus,
   isLoadingProviderModels,
   browserShowAdvancedControls,
+  appVersion,
   privilege,
   isRestartingAsAdmin,
   onSelectProvider,
@@ -248,6 +250,11 @@ export function SettingsModal({
 
           {activeTab === "system" ? (
             <>
+              <div className="settings-card">
+                <span>{locale.system.versionTitle}</span>
+                <strong>{appVersion ? `v${appVersion}` : locale.system.versionUnknown}</strong>
+                <p>{locale.system.versionDescription}</p>
+              </div>
               <div className="settings-card">
                 <span>{locale.system.languageTitle}</span>
                 <strong>{language === "zh-CN" ? locale.system.chinese : locale.system.english}</strong>

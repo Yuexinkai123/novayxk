@@ -74,13 +74,13 @@ describe("config service secure storage", () => {
       pendingAdminResume: {
         action: "run-command",
         source: "ai",
-        command: "winget uninstall --id Tencent.QQLive",
+        command: "winget uninstall --id Example.App",
         controlMode: "full",
         taskId: "task-12345678",
         projectRoot: "D:/repo",
         createdAt: "2026-06-02T12:00:00.000Z",
         messages: [
-          { role: "user", content: "卸载腾讯视频" },
+          { role: "user", content: "卸载示例应用" },
           { role: "assistant", content: "我先帮你卸载。" },
         ],
       },
@@ -98,8 +98,8 @@ describe("config service secure storage", () => {
     expect(config.hasSeenWorkspaceGuide).toBe(true);
     expect(config.workspaceLayout?.rightPanelWidth).toBe(688);
     expect(config.workspaceLayout?.isBottomCollapsed).toBe(true);
-    expect(config.pendingAdminResume?.command).toBe("winget uninstall --id Tencent.QQLive");
-    expect(config.pendingAdminResume?.messages?.[0]?.content).toBe("卸载腾讯视频");
+    expect(config.pendingAdminResume?.command).toBe("winget uninstall --id Example.App");
+    expect(config.pendingAdminResume?.messages?.[0]?.content).toBe("卸载示例应用");
   });
 
   it("migrates plaintext api keys to encrypted storage when reading", async () => {

@@ -96,6 +96,36 @@ type WebSearchRoundAssessment = {
   newRelevantHosts: string[];
   improved: boolean;
 };
+type WebSearchFallbackPlan = {
+  requests: WebSearchRequest[];
+  reason: string;
+};
+
+export function normalizeWebSearchQueryForFallback(value: string) {
+  return String(value || "")
+    .replace(/20\d{2}年(?:\d{1,2}月)?(?:\d{1,2}日)?/g, "")
+    .replace(/\b20\d{2}[-/]\d{1,2}(?:[-/]\d{1,2})?\b/g, "")
+    .replace(/\b20\d{2}\b/g, "")
+    .replace(/(?:前两天|这两天|最近几天|最近|刚刚|刚才|今天|昨日|昨天|明天|本周|近期|latest|recent|today|yesterday|this week)/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function buildGenericWebSearchFallbackQueries(userGoal: string, request: WebSearchRequest) {
+  const currentYear = new Date().getFullYear();
+  const source = normalizeWebSearchQueryForFallback(userGoal || request.query)
+    .replace(/^(?:你如何看待|如何看待|怎么看待|你怎么看|怎么看|评价一下|说说|聊聊|what do you think of|how do you view)\s*/i, "")
+    .trim();
+  if (!source) return [];
+
+  const queries = [
+    source,
+    `${source} ${currentYear}`,
+    `${source} official news ${currentYear}`,
+  ];
+
+  return [...new Set(queries.map((query) => query.replace(/\s+/g, " ").trim()).filter(Boolean))];
+}
 
 type UseAiAssistantOptions = {
   prompt: string;
@@ -1511,6 +1541,48 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
       .filter(Boolean);
   }
 
+  function buildFallbackRequest(baseRequest: WebSearchRequest, query: string): WebSearchRequest {
+    return {
+      query,
+      maxResults: Math.max(baseRequest.maxResults ?? 0, assistantMode === "low" ? 4 : 6),
+      includePageContent: baseRequest.includePageContent ?? true,
+      includePageContentCount: Math.max(baseRequest.includePageContentCount ?? 0, assistantMode === "deep" ? 3 : 2),
+    };
+  }
+
+  function buildWebSearchFallbackPlan(
+    requests: WebSearchRequest[],
+    responses: WebSearchResponse[],
+    userGoal: string,
+  ): WebSearchFallbackPlan | null {
+    const totalResults = responses.reduce((sum, response) => sum + response.resultCount, 0);
+    const hasDomainLimitedZeroResult = requests.some((request, index) =>
+      getWebSearchQueryDomains(request).length > 0 && (responses[index]?.resultCount ?? 0) === 0,
+    );
+    if (totalResults > 0 && !hasDomainLimitedZeroResult) return null;
+
+    const primaryRequest = requests[0];
+    if (!primaryRequest) return null;
+
+    const fallbackQueries = buildGenericWebSearchFallbackQueries(userGoal, primaryRequest).filter((query) => query.length >= 2);
+    const dedupedQueries = [...new Set(fallbackQueries.map((query) => query.toLowerCase()))]
+      .map((lowerQuery) => fallbackQueries.find((query) => query.toLowerCase() === lowerQuery))
+      .filter((query): query is string => Boolean(query));
+
+    const requestsToTry = dedupedQueries
+      .filter((query) => query.toLowerCase() !== primaryRequest.query.trim().toLowerCase() || getWebSearchQueryDomains(primaryRequest).length > 0)
+      .slice(0, assistantMode === "low" ? 1 : 2)
+      .map((query) => buildFallbackRequest(primaryRequest, query));
+
+    if (!requestsToTry.length) return null;
+    return {
+      requests: requestsToTry,
+      reason: isChinese
+        ? "上一轮联网搜索结果太少或域名限制过窄，已自动放宽条件继续搜索。"
+        : "The previous web search had too few results or overly narrow domain filters, so Novayxk is broadening the query automatically.",
+    };
+  }
+
   function scoreWebSearchResult(request: WebSearchRequest, userGoal: string, result: WebSearchResponse["results"][number]) {
     const queryPhrase = normalizeSearchText(request.query);
     const queryTerms = extractSearchTerms(request.query);
@@ -1640,43 +1712,12 @@ ${resultJudgementNote ? `\n\n[Result judgement guardrails]\n${resultJudgementNot
 
   function buildForcedWebSearchRequest(promptText: string): WebSearchRequest {
     const normalized = promptText.trim();
-    const request: WebSearchRequest = {
-      query: normalized,
+    return {
+      query: normalizeWebSearchQueryForFallback(normalized),
       maxResults: assistantMode === "deep" ? 6 : assistantMode === "low" ? 4 : 5,
       includePageContent: true,
       includePageContentCount: assistantMode === "deep" ? 3 : 2,
     };
-    if (/(?:openai|gpt|chatgpt|anthropic|claude|google|gemini|microsoft|github|白宫|white house|外交部|mfa|国务院|state council)/i.test(normalized)) {
-      const domains: string[] = [];
-      if (/(?:openai|gpt|chatgpt)/i.test(normalized)) {
-        domains.push("openai.com", "developers.openai.com");
-      }
-      if (/(?:anthropic|claude)/i.test(normalized)) {
-        domains.push("anthropic.com");
-      }
-      if (/(?:google|gemini)/i.test(normalized)) {
-        domains.push("blog.google", "deepmind.google", "googleblog.com");
-      }
-      if (/(?:microsoft)/i.test(normalized)) {
-        domains.push("microsoft.com");
-      }
-      if (/(?:github)/i.test(normalized)) {
-        domains.push("github.blog", "github.com");
-      }
-      if (/(?:白宫|white house)/i.test(normalized)) {
-        domains.push("whitehouse.gov");
-      }
-      if (/(?:外交部|mfa)/i.test(normalized)) {
-        domains.push("mfa.gov.cn");
-      }
-      if (/(?:国务院|state council)/i.test(normalized)) {
-        domains.push("gov.cn");
-      }
-      if (domains.length) {
-        request.domains = [...new Set(domains)];
-      }
-    }
-    return request;
   }
 
   async function requestFinalWebSearchAnswer(
@@ -1799,7 +1840,7 @@ Give the final answer directly.`,
         ...baseMessages,
         {
           role: "assistant",
-          content: `An incomplete \`web-search\` block or JSON parsing failure was detected.\n\nReason: ${parseIssue}\n\nPlease output a strict JSON \`web-search\` block such as {"query":"latest GPT-5.4 release","domains":["openai.com"],"maxResults":5,"includePageContent":true,"includePageContentCount":2}.`,
+          content: `An incomplete \`web-search\` block or JSON parsing failure was detected.\n\nReason: ${parseIssue}\n\nPlease output a strict JSON \`web-search\` block such as {"query":"latest policy announcement official source","maxResults":5,"includePageContent":true,"includePageContentCount":2}.`,
         },
       ];
       setMessages(nextMessages);
@@ -1848,6 +1889,20 @@ Give the final answer directly.`,
       const response = await window.novayxk.webSearch(request);
       responses.push(response);
       resultBlocks.push(formatWebSearchResponse(response));
+    }
+    const fallbackPlan = buildWebSearchFallbackPlan(freshRequests, responses, getLatestUserGoal(baseMessages));
+    if (fallbackPlan && loopState.roundsUsed < loopState.maxRounds) {
+      const fallbackContent = `\`\`\`web-search\n${JSON.stringify(fallbackPlan.requests, null, 2)}\n\`\`\``;
+      const fallbackMessages: ChatMessage[] = [
+        ...baseMessages,
+        {
+          role: "assistant",
+          content: fallbackPlan.reason,
+        },
+      ];
+      setMessages(fallbackMessages);
+      setStatus(fallbackPlan.reason);
+      return executeAiWebSearch(fallbackContent, fallbackMessages, seenSearches, loopState, [...accumulatedResponses, ...responses]);
     }
     const allResponses = [...accumulatedResponses, ...responses];
     const roundAssessment = assessWebSearchRound(freshRequests, responses, getLatestUserGoal(baseMessages), loopState);
@@ -2310,7 +2365,7 @@ Please decide whether another step is needed now.`,
                 `1. For project file changes, output only a valid \`\`\`fileops\`\`\` JSON array. The only allowed fields are type, path, content, overwrite, search, replace, and occurrence.\n` +
                 `2. Every fileops path must be a relative path inside the current project. Do not use absolute paths such as Desktop, Downloads, or Documents.\n` +
                 `3. For browser page actions, output only a valid \`\`\`browser-actions\`\`\` JSON payload.\n` +
-                `4. For built-in online lookup, output only a valid \`\`\`web-search\`\`\` JSON payload such as {"query":"...","domains":["openai.com"],"maxResults":5,"includePageContent":true,"includePageContentCount":2}.\n` +
+                `4. For built-in online lookup, output only a valid \`\`\`web-search\`\`\` JSON payload such as {"query":"...","maxResults":5,"includePageContent":true,"includePageContentCount":2}.\n` +
                 `5. If the target is the Desktop, Downloads, a system directory, a system file, or any path outside the project, use \`\`\`powershell-run\`\`\` instead.\n` +
                 `6. Do not output the old JSON shape like { operation/create/path/content } again.\n` +
                 `7. If the content is long, prefer multiple steps instead of only giving a lead-in.\n` +

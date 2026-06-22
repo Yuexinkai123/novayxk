@@ -37,7 +37,7 @@ export function shouldForceBuiltInWebSearch(prompt: string) {
   if (!normalized) return false;
 
   const likelyNewsOrReleaseSubject =
-    /(?:特朗普|拜登|习近平|白宫|外交部|openai|anthropic|gpt|claude|gemini|发布|模型|新闻|消息|访问|访华|会晤|制裁|融资|收购|政策|公告|官宣|release|launch|visit|announcement|official)/i.test(
+    /(?:发布|模型|新闻|消息|访问|出访|来访|互访|访[一-龥]{1,4}|赴[一-龥]{1,4}|来[一-龥]{1,4}|会晤|峰会|选举|制裁|融资|收购|政策|公告|官宣|版本|更新|公司|机构|政府|总统|主席|总理|部长|外交|法院|监管|市场|股价|财报|release|launch|visit|summit|announcement|official|policy|election|sanction|funding|acquisition|earnings|market|regulator|government|president|minister|court)/i.test(
       normalized,
     );
 
@@ -101,7 +101,7 @@ export function shouldAutoInspectCurrentMachine(prompt: string) {
     );
   if (!asksToInspect) return false;
 
-  return /(?:我的电脑|电脑上|电脑里|本机|当前电脑|系统里|系统上|windows|软件|应用|程序|进程|服务|注册表|环境变量|wsl|docker|node|python|git|uu|加速器)/i.test(
+  return /(?:我的电脑|电脑上|电脑里|本机|当前电脑|系统里|系统上|windows|软件|应用|程序|进程|服务|注册表|环境变量|wsl|docker|node|python|git|加速器|浏览器|编辑器|数据库|驱动|客户端|工具)/i.test(
     normalized,
   );
 }

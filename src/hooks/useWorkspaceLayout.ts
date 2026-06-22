@@ -3,7 +3,8 @@ import { clamp } from "../project/tree";
 import type { WorkspaceLayoutConfig } from "../vite-env";
 
 const LEFT_PANEL_MIN_WIDTH = 268;
-const RIGHT_PANEL_MIN_WIDTH = 320;
+const RIGHT_PANEL_MIN_WIDTH = 400;
+const RIGHT_PANEL_DEFAULT_WIDTH = 400;
 const WORKSPACE_HORIZONTAL_PADDING = 28;
 const RESIZE_HANDLE_SIZE = 6;
 const MIN_CENTER_WIDTH_WITH_SIDEBAR = 320;
@@ -32,7 +33,7 @@ function normalizeInitialWidth(value: number | undefined, fallback: number) {
 
 export function useWorkspaceLayout({ initialLayout, onLayoutChange }: UseWorkspaceLayoutOptions = {}) {
   const [leftPanelWidth, setLeftPanelWidth] = React.useState(() => normalizeInitialWidth(initialLayout?.leftPanelWidth, 280));
-  const [rightPanelWidth, setRightPanelWidth] = React.useState(() => normalizeInitialWidth(initialLayout?.rightPanelWidth, 400));
+  const [rightPanelWidth, setRightPanelWidth] = React.useState(() => normalizeInitialWidth(initialLayout?.rightPanelWidth, RIGHT_PANEL_DEFAULT_WIDTH));
   const [bottomPanelHeight, setBottomPanelHeight] = React.useState(() => normalizeInitialWidth(initialLayout?.bottomPanelHeight, 272));
   const [isLeftCollapsed, setIsLeftCollapsed] = React.useState(initialLayout?.isLeftCollapsed === true);
   const [isRightCollapsed, setIsRightCollapsed] = React.useState(initialLayout?.isRightCollapsed === true);
@@ -90,6 +91,7 @@ export function useWorkspaceLayout({ initialLayout, onLayoutChange }: UseWorkspa
   const isSidebarVisible = !isLeftCollapsed && (!leftAutoHidden || isStackedLayout);
   const isCenterVisible = !centerAutoHidden || isStackedLayout;
   const isOnlyAssistantVisible = !isStackedLayout && !isRightCollapsed && !isSidebarVisible && !isCenterVisible;
+  const isWorkspaceCompressed = !isStackedLayout && !isRightCollapsed && (leftAutoHidden || centerAutoHidden);
 
   const previousLayoutRef = React.useRef({
     viewportWidth,
@@ -129,6 +131,7 @@ export function useWorkspaceLayout({ initialLayout, onLayoutChange }: UseWorkspa
       isCenterVisible,
     };
   }, [isCenterVisible, isRightCollapsed, isSidebarVisible, isStackedLayout, rightPanelWidth, viewportWidth]);
+
 
   const desktopColumns = isOnlyAssistantVisible
     ? [`${RESIZE_HANDLE_SIZE}px`, "minmax(0, 1fr)"]
@@ -183,6 +186,10 @@ export function useWorkspaceLayout({ initialLayout, onLayoutChange }: UseWorkspa
     [bottomPanelHeight, leftPanelWidth, rightPanelWidth, viewportWidth],
   );
 
+  const resetWorkspaceCompression = React.useCallback(() => {
+    setRightPanelWidth(Math.min(RIGHT_PANEL_DEFAULT_WIDTH, getMaxRightPanelWidth(viewportWidth)));
+  }, [viewportWidth]);
+
   return {
     isLeftCollapsed,
     setIsLeftCollapsed,
@@ -192,6 +199,10 @@ export function useWorkspaceLayout({ initialLayout, onLayoutChange }: UseWorkspa
     setIsBottomCollapsed,
     isSidebarVisible,
     isCenterVisible,
+    isWorkspaceCompressed,
+    isSidebarAutoHidden: leftAutoHidden && !isStackedLayout,
+    isCenterAutoHidden: centerAutoHidden && !isStackedLayout,
+    resetWorkspaceCompression,
     workspaceStyle,
     editorStyle,
     startPanelResize,

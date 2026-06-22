@@ -16,7 +16,6 @@ import {
   UnlockKeyhole,
   X,
 } from "lucide-react";
-import novayxkLogo from "../../assets/icons/novayxk-64.png";
 import type {
   AiControlMode,
   AssistantMode,
@@ -47,16 +46,13 @@ import { useAiAssistant } from "../hooks/useAiAssistant";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions";
 import { useBrowserWorkspace } from "../hooks/useBrowserWorkspace";
 import { hasAnyConfiguredProvider } from "../ai/providers";
-import {
-  PRODUCT_NAME,
-} from "../app/product";
 import { getWorkspaceGuideKind } from "../app/workspaceGuide";
 import { getLocaleStrings, normalizeAppLanguage } from "../app/i18n";
 import {
   normalizeRelativePath,
   shortPath,
 } from "../project/tree";
-import { countTextMatches, getEditorStats, handleCodeEditorKeyDown } from "../hooks/useCodeEditor";
+import { getEditorStats, handleCodeEditorKeyDown } from "../hooks/useCodeEditor";
 
 const emptyMessages: ChatMessage[] = [];
 type AdminRequestState = "ready" | "restarting" | "cancelled";
@@ -78,8 +74,6 @@ function App() {
   const [status, setStatus] = React.useState<string>(getLocaleStrings(initialLanguage).app.statusOpenProjectToStart);
   const [assistantPromptFocusNonce, setAssistantPromptFocusNonce] = React.useState(0);
   const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
-  const [editorFind, setEditorFind] = React.useState("");
-  const [isWordWrapEnabled, setIsWordWrapEnabled] = React.useState(false);
   const [isWelcomeOpen, setIsWelcomeOpen] = React.useState(
     initialConfig?.hasSeenWelcome !== true &&
       !initialConfig?.lastProjectRoot &&
@@ -163,6 +157,10 @@ function App() {
     setIsBottomCollapsed,
     isSidebarVisible,
     isCenterVisible,
+    isWorkspaceCompressed,
+    isSidebarAutoHidden,
+    isCenterAutoHidden,
+    resetWorkspaceCompression,
     workspaceStyle,
     editorStyle,
     startPanelResize,
@@ -229,12 +227,9 @@ function App() {
     projectMemoryDraft,
     setProjectMemoryDraft,
     activeTaskId,
-    activeTaskTitle,
-    setActiveTaskTitle,
     activeTaskSummary,
     activeTask,
     saveCurrentTask,
-    saveCurrentTaskWithStatus,
     startNewTask,
     loadTask,
     saveProjectMemoryDraft,
@@ -248,10 +243,6 @@ function App() {
   });
 
   const selectedFileStats = React.useMemo(() => getEditorStats(selectedTextFile?.content ?? ""), [selectedTextFile?.content]);
-  const editorFindMatches = React.useMemo(
-    () => countTextMatches(selectedTextFile?.content ?? "", editorFind),
-    [editorFind, selectedTextFile?.content],
-  );
   const workspaceGuideKind = React.useMemo(
     () =>
       getWorkspaceGuideKind({
@@ -314,10 +305,21 @@ function App() {
 
   React.useEffect(() => {
     const chatList = chatListRef.current;
-    if (chatList) {
-      if (!shouldStickToBottomRef.current) return;
+    if (!chatList) return;
+    if (!isLoading && !shouldStickToBottomRef.current) return;
+
+    const scrollToBottom = () => {
       chatList.scrollTop = chatList.scrollHeight;
-    }
+      shouldStickToBottomRef.current = true;
+    };
+
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    const timeout = window.setTimeout(scrollToBottom, 60);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+    };
   }, [messages, isLoading]);
 
   React.useEffect(() => {
@@ -735,15 +737,6 @@ function App() {
     <main className="app-shell" data-theme={theme}>
       <header className="topbar">
         <div className="topbar-leading">
-          <div className="brand-block">
-            <div className="brand-mark">
-              <img src={novayxkLogo} alt="" />
-            </div>
-            <div>
-              <h1>{PRODUCT_NAME}</h1>
-              <p>{appStrings.productTagline}</p>
-            </div>
-          </div>
           <div className="topbar-project-state">
             <span>{appStrings.currentWorkspace}</span>
             <strong>{project ? shortPath(project.root) : appStrings.noProjectOpened}</strong>
@@ -814,7 +807,7 @@ function App() {
       </header>
 
       <section
-        className={`workspace ${isLeftCollapsed ? "left-collapsed" : ""} ${isRightCollapsed ? "right-collapsed" : ""}`}
+        className={`workspace ${isLeftCollapsed ? "left-collapsed" : ""} ${isRightCollapsed ? "right-collapsed" : ""} ${isWorkspaceCompressed ? "workspace-compressed" : ""} ${isSidebarAutoHidden ? "sidebar-auto-hidden" : ""} ${isCenterAutoHidden ? "center-auto-hidden" : ""}`}
         style={workspaceStyle}
       >
         {isLeftCollapsed && (
@@ -822,9 +815,9 @@ function App() {
             <ChevronsRight size={15} />
           </button>
         )}
-        {isRightCollapsed && (
-          <button className="restore-panel restore-right" onClick={() => setIsRightCollapsed(false)} title={appStrings.showAssistantPanel}>
-            <ChevronsLeft size={15} />
+        {!isLeftCollapsed && isWorkspaceCompressed && (
+          <button className="restore-panel restore-workspace" onClick={resetWorkspaceCompression} title={appStrings.restoreWorkspacePanels}>
+            <ChevronsRight size={15} />
           </button>
         )}
 
@@ -867,14 +860,9 @@ function App() {
               selectedFile={selectedFile}
               isEditorDirty={isEditorDirty}
               stats={selectedFileStats}
-              editorFind={editorFind}
-              editorFindMatches={editorFindMatches}
-              isWordWrapEnabled={isWordWrapEnabled}
               isBottomCollapsed={isBottomCollapsed}
               aiControlMode={aiControlMode}
               workspaceGuideKind={displayedWorkspaceGuideKind}
-              onEditorFindChange={setEditorFind}
-              onToggleWordWrap={() => setIsWordWrapEnabled((value) => !value)}
               onShowBottomPanel={() => setIsBottomCollapsed(false)}
               onSaveSelectedFile={saveSelectedFile}
               onOpenSettings={() => {
@@ -942,55 +930,55 @@ function App() {
           />
         )}
 
-        <AssistantPanel
-          isCollapsed={isRightCollapsed}
-          model={activeProvider.model || appStrings.noModelSelected}
-          language={language}
-          assistantMode={assistantMode}
-          hasProject={Boolean(project)}
-          isModelReady={hasConfiguredProvider}
-          activeTaskId={activeTaskId}
-          activeTaskTitle={activeTaskTitle}
-          activeTask={activeTask}
-          tasks={memoryState?.tasks ?? []}
-          projectMemoryLength={memoryState?.memory.length ?? 0}
-          messages={messages}
-          isLoading={isLoading}
-          loadingElapsedMs={loadingElapsedMs}
-          prompt={prompt}
-          isStopping={isStopping}
-          runningTerminalTaskCount={runningTerminalTaskCount}
-          promptFocusNonce={assistantPromptFocusNonce}
-          chatListRef={chatListRef}
-          onCollapse={() => setIsRightCollapsed(true)}
-          onLoadTask={(taskId) => {
-            setEditingMessageIndex(null);
-            void loadTask(taskId);
-          }}
-          onStartNewTask={() => {
-            setEditingMessageIndex(null);
-            void startNewTask();
-          }}
-          onSaveCurrentTask={saveCurrentTaskWithStatus}
-          onOpenMemory={() => setIsMemoryOpen(true)}
-          onTaskTitleChange={setActiveTaskTitle}
-          onTaskTitleBlur={() => {
-            if (activeTaskId) void saveCurrentTask(messages);
-          }}
-          onPromptChange={setPrompt}
-          onSendMessage={sendMessage}
-          onAssistantModeChange={switchAssistantMode}
-          onStopGeneration={stopGeneration}
-          editingMessageIndex={editingMessageIndex}
-          onEditPreviousPrompt={(index) => {
-            const targetMessage = messages[index];
-            if (!targetMessage || targetMessage.role !== "user") return;
-            setPrompt(targetMessage.content);
-            setEditingMessageIndex(index);
-            setAssistantPromptFocusNonce((value) => value + 1);
-            setStatus(appStrings.previousPromptRestored);
-          }}
-        />
+        {!isRightCollapsed && (
+          <AssistantPanel
+            isCollapsed={false}
+            model={activeProvider.model || appStrings.noModelSelected}
+            language={language}
+            assistantMode={assistantMode}
+            hasProject={Boolean(project)}
+            isModelReady={hasConfiguredProvider}
+            activeTaskId={activeTaskId}
+            tasks={memoryState?.tasks ?? []}
+            messages={messages}
+            isLoading={isLoading}
+            loadingElapsedMs={loadingElapsedMs}
+            prompt={prompt}
+            isStopping={isStopping}
+            runningTerminalTaskCount={runningTerminalTaskCount}
+            promptFocusNonce={assistantPromptFocusNonce}
+            chatListRef={chatListRef}
+            onCollapse={() => setIsRightCollapsed(true)}
+            onLoadTask={(taskId) => {
+              setEditingMessageIndex(null);
+              void loadTask(taskId);
+            }}
+            onStartNewTask={() => {
+              setEditingMessageIndex(null);
+              void startNewTask();
+            }}
+            onOpenMemory={() => setIsMemoryOpen(true)}
+            onPromptChange={setPrompt}
+            onSendMessage={sendMessage}
+            onAssistantModeChange={switchAssistantMode}
+            onStopGeneration={stopGeneration}
+            editingMessageIndex={editingMessageIndex}
+            onEditPreviousPrompt={(index) => {
+              const targetMessage = messages[index];
+              if (!targetMessage || targetMessage.role !== "user") return;
+              setPrompt(targetMessage.content);
+              setEditingMessageIndex(index);
+              setAssistantPromptFocusNonce((value) => value + 1);
+              setStatus(appStrings.previousPromptRestored);
+            }}
+          />
+        )}
+
+        {isRightCollapsed && (
+          <button className="restore-panel restore-right" onClick={() => setIsRightCollapsed(false)} title={appStrings.showAssistantPanel}>
+            <ChevronsLeft size={15} />
+          </button>
+        )}
       </section>
 
       <footer className="statusbar">
@@ -1010,6 +998,7 @@ function App() {
           providerModelStatus={providerModelStatus}
           isLoadingProviderModels={isLoadingProviderModels}
           browserShowAdvancedControls={browserShowAdvancedControls}
+          appVersion={initialConfig.appVersion ?? __NOVAYXK_APP_VERSION__}
           privilege={privilege}
           isRestartingAsAdmin={isRestartingAsAdmin}
           onSelectProvider={setEditingProviderId}
